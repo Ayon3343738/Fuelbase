@@ -119,7 +119,7 @@ function NavButton({
   onPress,
 }: {
   icon: keyof typeof Ionicons.glyphMap;
-  label: string;
+  label: String;
   active?: boolean;
   onPress: () => void;
 }) {
