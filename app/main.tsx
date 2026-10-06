@@ -1,229 +1,315 @@
-import React from "react";
-
-import {
-    View,
-     StyleSheet,
-    TouchableOpacity,
-    Text
-} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { Background } from "@react-navigation/elements";
+import {
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 
-const COLOURS={
-  yellow: '#FFC107',
-  yellowLight: '#FFF3CD',
-  yellowDark: '#B8860B',
-  red: '#E53935',
-  redLight: '#FDE8E7',
-  redDark: '#8E1C1C',
-  white: '#FFFFFF',
-}
+export default function MainScreen() {
+  const router = useRouter();
 
-export default function HoomeScreen(){
-    const router=useRouter();
+  // Temporary values
+  // You can connect these to Firebase later.
+  const userName = "Name";
+  const remainingQuota = 20.0;
 
-    return(
-        <SafeAreaView style={styles.safeArea}>
-            <View style={styles.container}>
-                <Text style={styles.cardLabel}>
-                  Hello name
-                </Text>
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" backgroundColor="#E00000" />
 
-                <View style={[styles.card,styles.cardquata]}>
-                    <View style={styles.quata12}>
-                        <Text style={styles.cardLabel}>
-                            Remaining Quata 
-                        </Text>
+      <View style={styles.container}>
+        {/* =========================
+            HEADER
+        ========================== */}
 
-                        <Text style={styles.quataValue}>
-                            20.00L
-                        </Text>
-                    </View>
-                       
-                    <View style={styles.quatawrap}>
-                        <Ionicons
-                        name="water"
-                        size={26}
-                        color={COLOURS.yellow}/>
-                    </View>
+        <View style={styles.header}>
+          <Text style={styles.greeting}>Hello, {userName}</Text>
+        </View>
 
-                </View>
+        {/* =========================
+            MAIN CONTENT
+        ========================== */}
 
-                <TouchableOpacity
-                activeOpacity={0.8}
-                style={[styles.card,styles.cardquata]}
-                onPress={()=>router.push("/Login")}               
-                >
-                    <Text style={styles.tranlab}>
-                       Add transaction
-                    </Text>
+        <View style={styles.content}>
+          {/* Remaining Quota */}
 
-                </TouchableOpacity>
+          <View style={styles.quotaCard}>
+            <Text style={styles.quotaTitle}>Remaining Quota</Text>
 
-                <View style={styles.space}/>
+            <Text style={styles.quotaValue}>{remainingQuota.toFixed(2)} L</Text>
+          </View>
 
-                <View style={styles.botnav}>
-                    <NavButton 
-                    icon="home"
-                    label="Home"
-                    active
-                    onPress={()=>router.push('/Login')}
-                    />
+          {/* Add Transaction */}
 
-                    <NavButton 
-                    icon="location"
-                    label="Maps"
-                    active
-                    onPress={()=>router.push('/Login')}
-                        />
+          <TouchableOpacity
+            style={styles.transactionCard}
+            activeOpacity={0.8}
+            onPress={() => router.push("/Login")}
+          >
+            <Text style={styles.transactionText}>Add Transaction</Text>
 
-                     <NavButton 
-                    icon="pie-chart"
-                    label="Transactions"
-                    active
-                    onPress={()=>router.push('/Login')}
-                        /> 
-
-                    <NavButton 
-                    icon="person"
-                    label="Profile"
-                    active
-                    onPress={()=>router.push('/ProfileScreen')}
-                        />      
-
-                </View>
-
-  
-
+            <View style={styles.transactionIcon}>
+              <Ionicons name="swap-horizontal" size={40} color="#FFFFFF" />
             </View>
+          </TouchableOpacity>
+        </View>
 
-        </SafeAreaView>
-        
-        
-    );
+        {/* =========================
+            BOTTOM NAVIGATION
+        ========================== */}
+
+        <View style={styles.bottomNavigation}>
+          {/* HOME */}
+
+          <TouchableOpacity
+            style={styles.navItem}
+            activeOpacity={0.7}
+            onPress={() => router.replace("/main")}
+          >
+            <Ionicons name="home" size={45} color="#FFFFFF" />
+
+            <Text style={styles.navText}>Home</Text>
+          </TouchableOpacity>
+
+          {/* MAPS */}
+
+          <TouchableOpacity
+            style={styles.navItem}
+            activeOpacity={0.7}
+            onPress={() => router.push("/Login")}
+          >
+            <Ionicons name="location" size={45} color="#FFFFFF" />
+
+            <Text style={styles.navText}>Maps</Text>
+          </TouchableOpacity>
+
+          {/* TRANSACTION HISTORY */}
+
+          <TouchableOpacity
+            style={styles.navItem}
+            activeOpacity={0.7}
+            onPress={() => router.push("/ProfileScreen")}
+          >
+            <Ionicons name="time" size={45} color="#FFFFFF" />
+
+            <Text style={styles.navText}>Transaction{"\n"}History</Text>
+          </TouchableOpacity>
+
+          {/* PROFILE */}
+
+          <TouchableOpacity
+            style={styles.navItem}
+            activeOpacity={0.7}
+            onPress={() => router.push("/ProfileScreen")}
+          >
+            <Ionicons name="person" size={45} color="#FFFFFF" />
+
+            <Text style={styles.navText}>Profile</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  );
 }
-function NavButton({
-    icon,
-    label,
-    active=false,
-    onPress,
-}:{
-    icon: keyof typeof Ionicons.glyphMap;
-    label:String;
-    active?:boolean;
-    onPress:()=>void;
-}){
-    const color=active
-    ? COLOURS.red
-    : COLOURS.yellowDark
 
-    return(
-        <TouchableOpacity 
-        style={styles.navButton}
-        onPress={onPress}
-        activeOpacity={0.7}>
-        
-        <Ionicons 
-        name={icon}
-        size={22} 
-        color={color} />
+// ==================================================
+// STYLES
+// ==================================================
 
-        <Text style={[
-            styles.navLabel,
-            { color:color},
-        ]}
-        numberOfLines={1}
-        >
+const styles = StyleSheet.create({
+  // =========================
+  // SAFE AREA
+  // =========================
 
-        </Text>
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#E00000",
+  },
 
-        </TouchableOpacity>
-    )
-  
-}
+  // =========================
+  // MAIN CONTAINER
+  // =========================
 
-const styles=StyleSheet.create({
-    safeArea:{
-        flex:1,
-        backgroundColor:COLOURS.white
+  container: {
+    flex: 1,
+    backgroundColor: "#E00000",
 
-    },
-    container:{
-        flex:1,
-        paddingHorizontal:20,
-        paddingTop:16,
-    },
-    greeting:{
-        fontSize:28,
-        fontWeight:'800',
-        color:COLOURS.redDark
-    },
-    card:{
-        borderRadius:16,
-        padding:38,
-        marginBottom:16,
-        flexDirection:"row",
-        alignItems:'center',
-        justifyContent: 'space-between'
+    // Small horizontal margin
+    // so cards don't touch screen edges
+    paddingHorizontal: 20,
+  },
 
-    },
-    cardquata:{
-        backgroundColor:COLOURS.yellowLight,
-        borderWidth:1,
-        borderColor:COLOURS.yellow
-    },
-    quata12:{
-      fontSize:25,
-      color:COLOURS.yellowDark,
-      marginBottom:6
+  // =========================
+  // HEADER
+  // =========================
 
-    },
-    cardLabel:{
-        fontSize:30,
-        color:COLOURS.yellowDark,
-        marginBottom:35,
-        marginTop:10
-        
-    },
-    quatawrap:{
-         flexShrink: 1,
+  header: {
+    height: 120,
 
-    },
-    quataValue:{
-        fontSize:25,
-        fontWeight:"800",
-        color:COLOURS.yellowDark
-    },
-    tranlab:{
-        fontSize:25,
-        fontWeight:"600",
-        color:COLOURS.redDark
-    },
-    space:{
-        flex:1
-    },
-    botnav:{
-        flexDirection:"row",
-        justifyContent:"space-between",
-        borderTopWidth:1,
-        borderTopColor:COLOURS.yellowLight
-    },
-    navLabel:{
-        fontSize:11,
-        textAlign:"center",
-        marginTop:4
-    },
-    navButton:{
-        flex:1,
-        alignItems:"center"
+    justifyContent: "center",
 
-    }
-    
+    paddingLeft: 25,
 
+    paddingTop: 15,
+  },
 
+  greeting: {
+    color: "#FFFFFF",
 
+    fontSize: 38,
 
-    
-})
+    fontWeight: "700",
+  },
+
+  // =========================
+  // CONTENT
+  // =========================
+
+  content: {
+    flex: 1,
+
+    // Space between header
+    // and first card
+    paddingTop: 65,
+  },
+
+  // =========================
+  // REMAINING QUOTA
+  // =========================
+
+  quotaCard: {
+    backgroundColor: "#FFFFFF",
+
+    height: 145,
+
+    borderRadius: 25,
+
+    paddingHorizontal: 30,
+
+    justifyContent: "center",
+
+    marginBottom: 25,
+  },
+
+  quotaTitle: {
+    color: "#C90000",
+
+    fontSize: 26,
+
+    fontWeight: "700",
+
+    marginBottom: 7,
+  },
+
+  quotaValue: {
+    color: "#C90000",
+
+    fontSize: 28,
+
+    fontWeight: "600",
+  },
+
+  // =========================
+  // ADD TRANSACTION
+  // =========================
+
+  transactionCard: {
+    backgroundColor: "#FFFFFF",
+
+    height: 145,
+
+    borderRadius: 25,
+
+    paddingHorizontal: 30,
+
+    flexDirection: "row",
+
+    alignItems: "center",
+
+    justifyContent: "space-between",
+  },
+
+  transactionText: {
+    color: "#C90000",
+
+    fontSize: 26,
+
+    fontWeight: "700",
+
+    flexShrink: 1,
+  },
+
+  // =========================
+  // TRANSACTION ICON
+  // =========================
+
+  transactionIcon: {
+    width: 65,
+
+    height: 65,
+
+    borderRadius: 33,
+
+    backgroundColor: "#E00000",
+
+    justifyContent: "center",
+
+    alignItems: "center",
+
+    marginLeft: 10,
+  },
+
+  // =========================
+  // BOTTOM NAVIGATION
+  // =========================
+
+  bottomNavigation: {
+    height: 105,
+
+    backgroundColor: "#E00000",
+
+    flexDirection: "row",
+
+    justifyContent: "space-between",
+
+    alignItems: "center",
+
+    paddingHorizontal: 5,
+
+    paddingBottom: 5,
+  },
+
+  // =========================
+  // NAV ITEM
+  // =========================
+
+  navItem: {
+    flex: 1,
+
+    alignItems: "center",
+
+    justifyContent: "center",
+  },
+
+  // =========================
+  // NAV TEXT
+  // =========================
+
+  navText: {
+    color: "#111111",
+
+    fontSize: 14,
+
+    fontWeight: "700",
+
+    textAlign: "center",
+
+    marginTop: 4,
+
+    lineHeight: 17,
+  },
+});

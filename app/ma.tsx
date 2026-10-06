@@ -1,117 +1,82 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  SafeAreaView,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 
-const COLORS = {
-    yellow: '#FFC107',
-  yellowLight: '#FFF3CD',
-  yellowDark: '#B8860B',
-  red: '#E53935',
-  redLight: '#FDE8E7',
-  redDark: '#8E1C1C',
-  white: '#FFFFFF',
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-  
+const COLOURS = {
+  yellow: "#FFC107",
+  yellowLight: "#FFF3CD",
+  yellowDark: "#B8860B",
+  red: "#E53935",
+  redLight: "#FDE8E7",
+  redDark: "#8E1C1C",
+  white: "#FFFFFF",
 };
 
-export default function HomeScreen() {
+export default function HoomeScreen() {
   const router = useRouter();
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
+        <Text style={styles.cardLabel}>Hello name</Text>
 
-        {/* Greeting */}
-        <Text style={styles.greeting}>
-          Hello, Name
-        </Text>
+        <View style={[styles.card, styles.cardquata]}>
+          <View style={styles.quata12}>
+            <Text style={styles.cardLabel}>Remaining Quata</Text>
 
-        {/* Remaining Quota Card */}
-        <View style={[styles.card, styles.quotaCard]}>
-          <View style={styles.quotaTextWrap}>
-            <Text style={styles.cardLabel}>
-              Remaining Quota
-            </Text>
-
-            <Text style={styles.quotaValue}>
-              20.00 L
-            </Text>
+            <Text style={styles.quataValue}>20.00L</Text>
           </View>
 
-          <View style={styles.quotaIconWrap}>
-            <Ionicons
-              name="water"
-              size={26}
-              color={COLORS.yellow}
-            />
+          <View style={styles.quatawrap}>
+            <Ionicons name="water" size={26} color={COLOURS.yellow} />
           </View>
         </View>
 
-        {/* Add Transaction Card */}
         <TouchableOpacity
           activeOpacity={0.8}
-          style={[styles.card, styles.transactionCard]}
-          onPress={() => router.push('/Login')}
+          style={[styles.card, styles.cardquata]}
+          onPress={() => router.push("/Login")}
         >
-          <Text style={styles.transactionLabel}>
-            Add Transaction
-          </Text>
-
-          <View style={styles.transactionIconCircle}>
-            <Ionicons
-              name="swap-horizontal"
-              size={22}
-              color={COLORS.white}
-            />
-          </View>
+          <Text style={styles.tranlab}>Add transaction</Text>
         </TouchableOpacity>
 
-        {/* Spacer */}
-        <View style={styles.spacer} />
+        <View style={styles.space} />
 
-        {/* Bottom Navigation */}
-        <View style={styles.bottomNav}>
-
+        <View style={styles.botnav}>
           <NavButton
             icon="home"
             label="Home"
             active
-            onPress={() => router.push('/')}
+            onPress={() => router.push("/Login")}
           />
 
           <NavButton
             icon="location"
             label="Maps"
-            onPress={() => router.push('/Login')}
+            active
+            onPress={() => router.push("/Login")}
           />
 
           <NavButton
             icon="pie-chart"
             label="Transactions"
-            onPress={() =>
-              router.push('/Login')
-            }
+            active
+            onPress={() => router.push("/Login")}
           />
 
           <NavButton
             icon="person"
             label="Profile"
-            onPress={() => router.push('/Login')}
+            active
+            onPress={() => router.push("/ProfileScreen")}
           />
-
         </View>
       </View>
     </SafeAreaView>
   );
 }
-
 function NavButton({
   icon,
   label,
@@ -123,9 +88,7 @@ function NavButton({
   active?: boolean;
   onPress: () => void;
 }) {
-  const color = active
-    ? COLORS.red
-    : COLORS.yellowDark;
+  const color = active ? COLOURS.red : COLOURS.yellowDark;
 
   return (
     <TouchableOpacity
@@ -133,21 +96,12 @@ function NavButton({
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <Ionicons
-        name={icon}
-        size={22}
-        color={color}
-      />
+      <Ionicons name={icon} size={22} color={color} />
 
       <Text
-        style={[
-          styles.navLabel,
-          { color: color },
-        ]}
+        style={[styles.navLabel, { color: color }]}
         numberOfLines={1}
-      >
-        {label}
-      </Text>
+      ></Text>
     </TouchableOpacity>
   );
 }
@@ -155,104 +109,71 @@ function NavButton({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLOURS.white,
   },
-
   container: {
     flex: 1,
     paddingHorizontal: 20,
     paddingTop: 16,
   },
-
   greeting: {
     fontSize: 28,
-    fontWeight: '800',
-    color: COLORS.redDark,
-    marginBottom: 20,
+    fontWeight: "800",
+    color: COLOURS.redDark,
   },
-
   card: {
     borderRadius: 16,
-    padding: 18,
+    padding: 38,
     marginBottom: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
-
-  quotaCard: {
-    backgroundColor: COLORS.yellowLight,
+  cardquata: {
+    backgroundColor: COLOURS.yellowLight,
     borderWidth: 1,
-    borderColor: COLORS.yellow,
+    borderColor: COLOURS.yellow,
   },
-
-  quotaTextWrap: {
-    flexShrink: 1,
-  },
-
-  cardLabel: {
-    fontSize: 15,
-    color: COLORS.yellowDark,
+  quata12: {
+    fontSize: 25,
+    color: COLOURS.yellowDark,
     marginBottom: 6,
   },
-
-  quotaValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: COLORS.yellowDark,
+  cardLabel: {
+    fontSize: 30,
+    color: COLOURS.yellowDark,
+    marginBottom: 35,
+    marginTop: 10,
   },
-
-  quotaIconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
+  quatawrap: {
+    flexShrink: 1,
   },
-
-  transactionCard: {
-    backgroundColor: COLORS.redLight,
-    borderWidth: 1,
-    borderColor: COLORS.red,
+  quataValue: {
+    fontSize: 25,
+    fontWeight: "800",
+    color: COLOURS.yellowDark,
   },
-
-  transactionLabel: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: COLORS.redDark,
+  tranlab: {
+    fontSize: 25,
+    fontWeight: "600",
+    color: COLOURS.redDark,
   },
-
-  transactionIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.red,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  spacer: {
+  space: {
     flex: 1,
   },
-
-  bottomNav: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  botnav: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     borderTopWidth: 1,
-    borderTopColor: COLORS.yellowLight,
-    paddingTop: 10,
-    paddingBottom: 8,
+    borderTopColor: COLOURS.yellowLight,
   },
-
-  navButton: {
-    flex: 1,
-    alignItems: 'center',
-  },
-
   navLabel: {
     fontSize: 11,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 4,
+  },
+  navButton: {
+    flex: 1,
+    alignItems: "center",
   },
 });
