@@ -17,12 +17,20 @@ import {
   View,
 } from "react-native";
 
-import { doc, getDoc, getFirestore, setDoc } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 
 import { app } from "../firebase/firebaseConfig";
 
 const db = getFirestore(app);
-
 
 interface DailyDistances {
   Monday: number;
@@ -42,15 +50,19 @@ interface UserData {
   vehicleType: string;
   fuelType: string;
   qrImage?: string;
-
   quotaLiters?: number;
   refillDate?: string;
   kmPerLiter?: number;
-
   dailyDistances?: DailyDistances;
   weekStart?: string;
 }
 
+interface WeeklyTemplate {
+  id: string;
+  templateName: string;
+  distances: DailyDistances;
+  totalDistance: number;
+}
 
 const DEFAULT_QUOTA = 20;
 const DEFAULT_KM_PER_LITER = 12;
@@ -75,22 +87,17 @@ const DAYS: (keyof DailyDistances)[] = [
   "Sunday",
 ];
 
-
 export default function MainScreen() {
   const router = useRouter();
-
   const params = useLocalSearchParams();
 
   const nicParam = Array.isArray(params.nic) ? params.nic[0] : params.nic;
 
   const [user, setUser] = useState<UserData | null>(null);
-
   const [loading, setLoading] = useState(true);
 
- 
   const [dailyDistances, setDailyDistances] =
     useState<DailyDistances>(EMPTY_DISTANCES);
-
 
   const [editingDistances, setEditingDistances] =
     useState<DailyDistances>(EMPTY_DISTANCES);
@@ -105,61 +112,53 @@ export default function MainScreen() {
 
   const [refillDate, setRefillDate] = useState("");
 
-
   const [efficiencyModalVisible, setEfficiencyModalVisible] = useState(false);
 
   const [efficiencyInput, setEfficiencyInput] = useState("");
 
+  const [templateName, setTemplateName] = useState("Work Week");
 
+  const [templates, setTemplates] = useState<WeeklyTemplate[]>([]);
 
-  const formattedDate = "Tue Jun 23 2026";
+  const [templateModalVisible, setTemplateModalVisible] = useState(false);
 
-
+  const [templateLoading, setTemplateLoading] = useState(false);
 
   const getWeekStart = () => {
     const date = new Date();
-
     const day = date.getDay();
-
     const difference = day === 0 ? -6 : 1 - day;
 
     date.setDate(date.getDate() + difference);
-
     date.setHours(0, 0, 0, 0);
 
     return date.toISOString().split("T")[0];
   };
-
-
 
   useEffect(() => {
     loadUser();
   }, [nicParam]);
 
   const loadUser = async () => {
-    if (!nicParam) {
+    if (!nicParam || typeof nicParam !== "string") {
       Alert.alert("Error", "NIC was not received from Login.");
-
       setLoading(false);
       return;
     }
 
+    setLoading(true);
+
     try {
       const userRef = doc(db, "users", nicParam);
-
       const snapshot = await getDoc(userRef);
 
       if (!snapshot.exists()) {
         Alert.alert("Error", "User information was not found.");
-
-        setLoading(false);
+        setUser(null);
         return;
       }
 
       const data = snapshot.data();
-
-   
-
       const firebaseDistances = data.dailyDistances || {};
 
       const loadedDistances: DailyDistances = {
@@ -172,91 +171,60 @@ export default function MainScreen() {
         Sunday: Number(firebaseDistances.Sunday || 0),
       };
 
-   
-
       const loadedQuota = Number(data.quotaLiters ?? DEFAULT_QUOTA);
 
-
       const loadedKmPerLiter = Number(data.kmPerLiter ?? DEFAULT_KM_PER_LITER);
-
-
 
       let loadedRefillDate = data.refillDate || "";
 
       if (!loadedRefillDate) {
         const date = new Date();
-
         date.setDate(date.getDate() + 7);
 
         loadedRefillDate = date.toISOString().split("T")[0];
 
         await setDoc(
           userRef,
-          {
-            refillDate: loadedRefillDate,
-          },
-          {
-            merge: true,
-          },
+          { refillDate: loadedRefillDate },
+          { merge: true },
         );
       }
 
-
-
       const loadedUser: UserData = {
         ownerName: data.ownerName || "",
-
         nic: data.nic || nicParam,
-
         phone: data.phone || "",
-
         vehicleNumber: data.vehicleNumber || "",
-
         vehicleType: data.vehicleType || "",
-
         fuelType: data.fuelType || "",
-
         qrImage: data.qrImage || "",
-
         quotaLiters: loadedQuota,
-
         refillDate: loadedRefillDate,
-
         kmPerLiter: loadedKmPerLiter,
-
         dailyDistances: loadedDistances,
-
         weekStart: data.weekStart || getWeekStart(),
       };
 
       setUser(loadedUser);
-
       setDailyDistances(loadedDistances);
-
       setEditingDistances(loadedDistances);
-
       setQuotaLiters(loadedQuota);
-
       setKmPerLiter(loadedKmPerLiter);
-
       setRefillDate(loadedRefillDate);
     } catch (error) {
       console.log("Load user error:", error);
-
       Alert.alert("Error", "Could not load dashboard.");
     } finally {
       setLoading(false);
     }
   };
 
-
   const weeklyDistance = useMemo(() => {
-    return DAYS.reduce((total, day) => {
-      return total + Number(dailyDistances[day] || 0);
-    }, 0);
+    return DAYS.reduce(
+      (total, day) => total + Number(dailyDistances[day] || 0),
+      0,
+    );
   }, [dailyDistances]);
-
-
 
   const fuelUsed = useMemo(() => {
     if (kmPerLiter <= 0) {
@@ -266,13 +234,9 @@ export default function MainScreen() {
     return weeklyDistance / kmPerLiter;
   }, [weeklyDistance, kmPerLiter]);
 
- 
-
   const remainingFuel = useMemo(() => {
     return Math.max(0, quotaLiters - fuelUsed);
   }, [quotaLiters, fuelUsed]);
-
-
 
   const daysLeft = useMemo(() => {
     if (!refillDate) {
@@ -280,16 +244,13 @@ export default function MainScreen() {
     }
 
     const today = new Date();
-
     today.setHours(0, 0, 0, 0);
 
     const refill = new Date(`${refillDate}T00:00:00`);
-
     const difference = refill.getTime() - today.getTime();
 
     return Math.max(0, Math.ceil(difference / (1000 * 60 * 60 * 24)));
   }, [refillDate]);
-
 
   const dailyFuelLimit = useMemo(() => {
     if (daysLeft <= 0) {
@@ -299,36 +260,30 @@ export default function MainScreen() {
     return remainingFuel / daysLeft;
   }, [remainingFuel, daysLeft]);
 
-
-
   const dailyDistanceLimit = useMemo(() => {
     return dailyFuelLimit * kmPerLiter;
   }, [dailyFuelLimit, kmPerLiter]);
 
-
   const startWeeklyEdit = () => {
-    setEditingDistances({
-      ...dailyDistances,
-    });
-
+    setEditingDistances({ ...dailyDistances });
     setEditingWeeklyDistance(true);
   };
 
-
   const cancelWeeklyEdit = () => {
-    setEditingDistances({
-      ...dailyDistances,
-    });
-
+    setEditingDistances({ ...dailyDistances });
     setEditingWeeklyDistance(false);
   };
 
-
   const changeDayDistance = (day: keyof DailyDistances, value: string) => {
-
     const cleanedValue = value.replace(/[^0-9.]/g, "");
+    const parts = cleanedValue.split(".");
 
-    const numberValue = cleanedValue === "" ? 0 : Number(cleanedValue);
+    const validValue =
+      parts.length > 2
+        ? `${parts[0]}.${parts.slice(1).join("")}`
+        : cleanedValue;
+
+    const numberValue = validValue === "" ? 0 : Number(validValue);
 
     setEditingDistances((previous) => ({
       ...previous,
@@ -336,17 +291,20 @@ export default function MainScreen() {
     }));
   };
 
-
   const saveWeeklyDistances = async () => {
     if (!user) {
       return;
     }
 
-
     for (const day of DAYS) {
-      if (editingDistances[day] < 0) {
-        Alert.alert("Invalid Distance", `${day} cannot be negative.`);
-
+      if (
+        !Number.isFinite(editingDistances[day]) ||
+        editingDistances[day] < 0
+      ) {
+        Alert.alert(
+          "Invalid Distance",
+          `${day} must have a valid non-negative distance.`,
+        );
         return;
       }
     }
@@ -354,56 +312,156 @@ export default function MainScreen() {
     try {
       setSavingWeeklyDistance(true);
 
-      const userRef = doc(db, "users", user.nic);
-
-
       await setDoc(
-        userRef,
+        doc(db, "users", user.nic),
         {
-          dailyDistances: {
-            Monday: Number(editingDistances.Monday || 0),
-
-            Tuesday: Number(editingDistances.Tuesday || 0),
-
-            Wednesday: Number(editingDistances.Wednesday || 0),
-
-            Thursday: Number(editingDistances.Thursday || 0),
-
-            Friday: Number(editingDistances.Friday || 0),
-
-            Saturday: Number(editingDistances.Saturday || 0),
-
-            Sunday: Number(editingDistances.Sunday || 0),
-          },
-
+          dailyDistances: { ...editingDistances },
           weekStart: getWeekStart(),
         },
-        {
-          merge: true,
-        },
+        { merge: true },
       );
 
-      setDailyDistances({
-        ...editingDistances,
-      });
-
+      setDailyDistances({ ...editingDistances });
       setEditingWeeklyDistance(false);
 
       Alert.alert("Saved", "Weekly distances saved successfully.");
     } catch (error) {
       console.log("Save weekly distance error:", error);
-
       Alert.alert("Error", "Could not save weekly distances.");
     } finally {
       setSavingWeeklyDistance(false);
     }
   };
 
+  const getWeeklyTemplatesRef = () => {
+    if (!user?.nic?.trim()) {
+      throw new Error("User NIC is missing. Please log in again.");
+    }
 
+    return collection(db, "users", user.nic, "weeklyTemplates");
+  };
+
+  const saveWeeklyTemplate = async () => {
+    if (!user) {
+      Alert.alert("Error", "Please log in again.");
+      return;
+    }
+
+    if (!templateName.trim()) {
+      Alert.alert("Template Name", "Please enter a template name.");
+      return;
+    }
+
+    const sourceDistances = editingWeeklyDistance
+      ? editingDistances
+      : dailyDistances;
+
+    for (const day of DAYS) {
+      if (!Number.isFinite(sourceDistances[day]) || sourceDistances[day] < 0) {
+        Alert.alert(
+          "Invalid Distance",
+          `Please enter a valid distance for ${day}.`,
+        );
+        return;
+      }
+    }
+
+    try {
+      setTemplateLoading(true);
+
+      const savedDistances: DailyDistances = {
+        ...sourceDistances,
+      };
+
+      const totalDistance = DAYS.reduce(
+        (total, day) => total + savedDistances[day],
+        0,
+      );
+
+      await addDoc(getWeeklyTemplatesRef(), {
+        templateName: templateName.trim(),
+        distances: savedDistances,
+        totalDistance,
+        createdAt: serverTimestamp(),
+      });
+
+      Alert.alert(
+        "Template Saved",
+        `"${templateName.trim()}" has been saved and is ready to reuse.`,
+      );
+    } catch (error) {
+      console.error("Save weekly template error:", error);
+
+      Alert.alert(
+        "Save Failed",
+        "Could not save the weekly template. Check your Firebase configuration and internet connection.",
+      );
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const loadWeeklyTemplates = async () => {
+    if (!user) {
+      Alert.alert("Error", "Please log in again.");
+      return;
+    }
+
+    try {
+      setTemplateLoading(true);
+
+      const snapshot = await getDocs(getWeeklyTemplatesRef());
+
+      const loadedTemplates: WeeklyTemplate[] = snapshot.docs.map((item) => {
+        const data = item.data();
+        const saved = data.distances ?? {};
+
+        const normalizedDistances: DailyDistances = {
+          Monday: Math.max(0, Number(saved.Monday) || 0),
+          Tuesday: Math.max(0, Number(saved.Tuesday) || 0),
+          Wednesday: Math.max(0, Number(saved.Wednesday) || 0),
+          Thursday: Math.max(0, Number(saved.Thursday) || 0),
+          Friday: Math.max(0, Number(saved.Friday) || 0),
+          Saturday: Math.max(0, Number(saved.Saturday) || 0),
+          Sunday: Math.max(0, Number(saved.Sunday) || 0),
+        };
+
+        return {
+          id: item.id,
+          templateName: String(data.templateName || "Saved Week"),
+          distances: normalizedDistances,
+          totalDistance: DAYS.reduce(
+            (total, day) => total + normalizedDistances[day],
+            0,
+          ),
+        };
+      });
+
+      setTemplates(loadedTemplates);
+      setTemplateModalVisible(true);
+    } catch (error) {
+      console.error("Load weekly templates error:", error);
+
+      Alert.alert("Load Failed", "Could not load saved templates.");
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const applyWeeklyTemplate = (template: WeeklyTemplate) => {
+    setEditingDistances({ ...template.distances });
+    setTemplateName(template.templateName);
+    setEditingWeeklyDistance(true);
+    setTemplateModalVisible(false);
+
+    Alert.alert(
+      "Template Loaded",
+      `"${template.templateName}" has been loaded. Review the distances and press Save to update your current week.`,
+    );
+  };
 
   const openEfficiencyEdit = () => {
     setEfficiencyInput(String(kmPerLiter));
-
     setEfficiencyModalVisible(true);
   };
 
@@ -414,35 +472,27 @@ export default function MainScreen() {
 
     const value = Number(efficiencyInput);
 
-    if (!efficiencyInput.trim() || Number.isNaN(value) || value <= 0) {
+    if (!efficiencyInput.trim() || !Number.isFinite(value) || value <= 0) {
       Alert.alert("Invalid", "Please enter a valid KM/L value.");
-
       return;
     }
 
     try {
       await setDoc(
         doc(db, "users", user.nic),
-        {
-          kmPerLiter: value,
-        },
-        {
-          merge: true,
-        },
+        { kmPerLiter: value },
+        { merge: true },
       );
 
       setKmPerLiter(value);
-
       setEfficiencyModalVisible(false);
 
       Alert.alert("Saved", "Vehicle efficiency updated.");
     } catch (error) {
-      console.log(error);
-
+      console.log("Save efficiency error:", error);
       Alert.alert("Error", "Could not update KM/L.");
     }
   };
-
 
   const logout = () => {
     Alert.alert("Logout", "Do you want to logout?", [
@@ -459,7 +509,6 @@ export default function MainScreen() {
     ]);
   };
 
-
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -469,8 +518,6 @@ export default function MainScreen() {
       </SafeAreaView>
     );
   }
-
-
 
   if (!user) {
     return (
@@ -494,9 +541,8 @@ export default function MainScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* HEADER */}
-
         <View style={styles.topHeader}>
           <TouchableOpacity onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={38} color="#FFFFFF" />
@@ -506,9 +552,7 @@ export default function MainScreen() {
             onPress={() =>
               router.push({
                 pathname: "/Profile",
-                params: {
-                  nic: user.nic,
-                },
+                params: { nic: user.nic },
               })
             }
           >
@@ -516,24 +560,16 @@ export default function MainScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* DATE */}
-
-        <Text style={styles.dateText}>Tue Jun 23 2026</Text>
-
-        {/* VEHICLE NUMBER */}
+        <Text style={styles.dateText}>{new Date().toDateString()}</Text>
 
         <View style={styles.vehicleCard}>
           <Text style={styles.vehicleNumber}>{user.vehicleNumber}</Text>
         </View>
 
-        {/* QR IMAGE */}
-
         <View style={styles.qrCard}>
           {user.qrImage ? (
             <Image
-              source={{
-                uri: user.qrImage,
-              }}
+              source={{ uri: user.qrImage }}
               style={styles.qrImage}
               resizeMode="contain"
             />
@@ -546,15 +582,11 @@ export default function MainScreen() {
           )}
         </View>
 
-        {/* REMAINING FUEL */}
-
         <View style={styles.whiteCard}>
           <Text style={styles.bigCardText}>
             ⛽ You have {remainingFuel.toFixed(2)} Liters
           </Text>
         </View>
-
-        {/* REFILL */}
 
         <View style={styles.whiteCard}>
           <Text style={styles.normalCardText}>
@@ -562,8 +594,6 @@ export default function MainScreen() {
             <Text style={styles.boldText}>{daysLeft} days</Text>
           </Text>
         </View>
-
-  
 
         <View style={styles.weeklyCard}>
           <View style={styles.weeklyHeader}>
@@ -579,7 +609,60 @@ export default function MainScreen() {
             )}
           </View>
 
-  
+          <View style={styles.templateControls}>
+            <Text style={styles.templateSectionTitle}>
+              Save or reuse your weekly routine
+            </Text>
+
+            <TextInput
+              style={styles.templateNameInput}
+              value={templateName}
+              onChangeText={setTemplateName}
+              placeholder="Template name (e.g. Work Week)"
+              placeholderTextColor="#888888"
+              maxLength={50}
+            />
+
+            <View style={styles.templateButtonRow}>
+              <TouchableOpacity
+                style={[
+                  styles.templateSaveButton,
+                  templateLoading && styles.templateDisabledButton,
+                ]}
+                onPress={saveWeeklyTemplate}
+                disabled={templateLoading}
+              >
+                {templateLoading ? (
+                  <ActivityIndicator color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Ionicons name="save-outline" size={19} color="#FFFFFF" />
+
+                    <Text style={styles.templateSaveButtonText}>
+                      Save Template
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.templateLoadButton,
+                  templateLoading && styles.templateDisabledButton,
+                ]}
+                onPress={loadWeeklyTemplates}
+                disabled={templateLoading}
+              >
+                <Ionicons
+                  name="folder-open-outline"
+                  size={19}
+                  color="#8B0000"
+                />
+
+                <Text style={styles.templateLoadButtonText}>Load Template</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {editingWeeklyDistance ? (
             <>
@@ -608,8 +691,6 @@ export default function MainScreen() {
                 </View>
               ))}
 
-              {/* Temporary total */}
-
               <View style={styles.editTotalRow}>
                 <Text style={styles.editTotalLabel}>Weekly Total</Text>
 
@@ -621,8 +702,6 @@ export default function MainScreen() {
                   km
                 </Text>
               </View>
-
-              {/* SAVE / CANCEL */}
 
               <View style={styles.weeklyActionRow}>
                 <TouchableOpacity
@@ -647,8 +726,6 @@ export default function MainScreen() {
               </View>
             </>
           ) : (
-    
-
             <>
               <Text style={styles.weeklyTotal}>
                 {weeklyDistance.toFixed(1)} km
@@ -663,6 +740,7 @@ export default function MainScreen() {
           )}
         </View>
 
+        {/* VEHICLE EFFICIENCY */}
 
         <TouchableOpacity style={styles.whiteCard} onPress={openEfficiencyEdit}>
           <Text style={styles.efficiencyValue}>{kmPerLiter} km/L</Text>
@@ -670,7 +748,8 @@ export default function MainScreen() {
           <Text style={styles.editText}>✏️ Tap to edit vehicle efficiency</Text>
         </TouchableOpacity>
 
-   
+        {/* FUEL CALCULATION */}
+
         <View style={styles.calculationCard}>
           <Text style={styles.calculationTitle}>⛽ Fuel Calculation</Text>
 
@@ -705,7 +784,7 @@ export default function MainScreen() {
           />
         </View>
 
-
+        {/* VEHICLE INFORMATION */}
 
         <View style={styles.userCard}>
           <Text style={styles.userTitle}>👤 Vehicle Information</Text>
@@ -728,16 +807,12 @@ export default function MainScreen() {
           onPress={() =>
             router.push({
               pathname: "/Profile",
-              params: {
-                nic: user.nic,
-              },
+              params: { nic: user.nic },
             })
           }
         >
           <Text style={styles.profileButtonText}>View Profile</Text>
         </TouchableOpacity>
-
-        {/* LOGOUT */}
 
         <TouchableOpacity style={styles.logoutButton} onPress={logout}>
           <Text style={styles.logoutText}>Logout</Text>
@@ -784,10 +859,73 @@ export default function MainScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={templateModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setTemplateModalVisible(false)}
+      >
+        <View style={styles.templateModalBackground}>
+          <View style={styles.templateModalCard}>
+            <View style={styles.templateModalHeader}>
+              <Text style={styles.templateModalTitle}>
+                Saved Weekly Templates
+              </Text>
+
+              <TouchableOpacity onPress={() => setTemplateModalVisible(false)}>
+                <Ionicons name="close" size={27} color="#333333" />
+              </TouchableOpacity>
+            </View>
+
+            {templates.length === 0 ? (
+              <Text style={styles.templateEmptyText}>
+                No saved templates yet. Enter your daily distances and save a
+                template first.
+              </Text>
+            ) : (
+              <ScrollView
+                style={styles.templateList}
+                keyboardShouldPersistTaps="handled"
+              >
+                {templates.map((template) => (
+                  <TouchableOpacity
+                    key={template.id}
+                    style={styles.templateItem}
+                    onPress={() => applyWeeklyTemplate(template)}
+                  >
+                    <View style={styles.templateItemInfo}>
+                      <Text style={styles.templateItemName}>
+                        {template.templateName}
+                      </Text>
+
+                      <Text style={styles.templateItemTotal}>
+                        {template.totalDistance.toFixed(1)} km/week
+                      </Text>
+                    </View>
+
+                    <Ionicons
+                      name="chevron-forward"
+                      size={23}
+                      color="#8B0000"
+                    />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={styles.templateCloseButton}
+              onPress={() => setTemplateModalVisible(false)}
+            >
+              <Text style={styles.templateCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
-
 
 function DayRow({ day, distance }: { day: string; distance: number }) {
   return (
@@ -801,8 +939,6 @@ function DayRow({ day, distance }: { day: string; distance: number }) {
   );
 }
 
-
-
 function CalculationRow({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.calculationRow}>
@@ -812,8 +948,6 @@ function CalculationRow({ label, value }: { label: string; value: string }) {
     </View>
   );
 }
-
-
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
@@ -825,8 +959,6 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -837,8 +969,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 40,
   },
-
-
 
   loadingContainer: {
     flex: 1,
@@ -871,8 +1001,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
-
-
   topHeader: {
     height: 75,
     flexDirection: "row",
@@ -888,7 +1016,6 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
   },
 
-
   vehicleCard: {
     backgroundColor: "#FFFFFF",
     minHeight: 120,
@@ -903,7 +1030,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#111",
   },
-
 
   qrCard: {
     height: 320,
@@ -926,8 +1052,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "#555",
   },
-
-
 
   whiteCard: {
     backgroundColor: "#FFFFFF",
@@ -954,7 +1078,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#333",
   },
-
 
   weeklyCard: {
     backgroundColor: "#FFFFFF",
@@ -1007,8 +1130,6 @@ const styles = StyleSheet.create({
     marginVertical: 15,
   },
 
-
-
   dayRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1027,7 +1148,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#222",
   },
-
 
   editDayRow: {
     flexDirection: "row",
@@ -1114,7 +1234,158 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
+  templateControls: {
+    marginTop: 18,
+    marginBottom: 18,
+    padding: 15,
+    borderRadius: 16,
+    backgroundColor: "#FFF7E8",
+  },
 
+  templateSectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#333333",
+    marginBottom: 12,
+  },
+
+  templateNameInput: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#DDDDDD",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: "#222222",
+    fontSize: 15,
+    marginBottom: 12,
+  },
+
+  templateButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+
+  templateSaveButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: "#8B0000",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+
+  templateSaveButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+
+  templateLoadButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#8B0000",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+    gap: 6,
+  },
+
+  templateLoadButtonText: {
+    color: "#8B0000",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+
+  templateDisabledButton: {
+    opacity: 0.6,
+  },
+
+  templateModalBackground: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  templateModalCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: "75%",
+  },
+
+  templateModalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 18,
+  },
+
+  templateModalTitle: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#222222",
+    marginRight: 10,
+  },
+
+  templateEmptyText: {
+    color: "#666666",
+    lineHeight: 23,
+    paddingVertical: 15,
+  },
+
+  templateList: {
+    flexGrow: 0,
+  },
+
+  templateItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 15,
+    paddingHorizontal: 12,
+    backgroundColor: "#F8F8F8",
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+
+  templateItemInfo: {
+    flex: 1,
+  },
+
+  templateItemName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#222222",
+  },
+
+  templateItemTotal: {
+    fontSize: 14,
+    color: "#666666",
+    marginTop: 5,
+  },
+
+  templateCloseButton: {
+    backgroundColor: "#8B0000",
+    borderRadius: 12,
+    alignItems: "center",
+    paddingVertical: 13,
+    marginTop: 15,
+  },
+
+  templateCloseButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
 
   efficiencyValue: {
     fontSize: 25,
@@ -1127,8 +1398,6 @@ const styles = StyleSheet.create({
     color: "#555",
     fontSize: 16,
   },
-
- 
 
   calculationCard: {
     backgroundColor: "#FFFFFF",
@@ -1161,8 +1430,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: "#8B0000",
   },
-
-
 
   userCard: {
     backgroundColor: "#FFFFFF",
@@ -1197,7 +1464,6 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
-
   profileButton: {
     backgroundColor: "#FFA500",
     height: 58,
@@ -1227,8 +1493,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
 
- 
-
+  // Vehicle efficiency modal
 
   modalBackground: {
     flex: 1,
@@ -1262,6 +1527,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 15,
     fontSize: 18,
+    color: "#222222",
   },
 
   modalButtons: {

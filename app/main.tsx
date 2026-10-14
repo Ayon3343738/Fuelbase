@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { usePathname, useRouter } from "expo-router";
 import {
   SafeAreaView,
   StatusBar,
@@ -9,9 +9,9 @@ import {
   View,
 } from "react-native";
 
-// Home has no route: it is just an icon for the current screen
+// Change these routes to match your real files in the app folder
 const NAV_ITEMS = [
-  { label: "Home", icon: "home", route: null },
+  { label: "Home", icon: "home", route: "/" },
   { label: "Stations", icon: "location", route: "/Stations" },
   { label: "History", icon: "time", route: "/History" },
   { label: "Profile", icon: "person", route: "/ProfileScreen" },
@@ -19,6 +19,7 @@ const NAV_ITEMS = [
 
 export default function MainScreen() {
   const router = useRouter();
+  const pathname = usePathname();
 
   const username = "name";
   const remainingQuata = 20.0;
@@ -51,34 +52,26 @@ export default function MainScreen() {
 
         <View style={styles.bottnav}>
           {NAV_ITEMS.map((item) => {
-            // Home (no route): icon only, no navigation, always highlighted
-            if (!item.route) {
-              return (
-                <View
-                  key={item.label}
-                  style={[styles.navItem, styles.navItemActive]}
-                >
-                  <Ionicons name="home" size={36} color="#E00000" />
-                  <Text style={[styles.navText, styles.navTextActive]}>
-                    {item.label}
-                  </Text>
-                </View>
-              );
-            }
-
+            const isActive = pathname === item.route;
             return (
               <TouchableOpacity
                 key={item.label}
-                style={styles.navItem}
+                style={[styles.navItem, isActive && styles.navItemActive]}
                 activeOpacity={0.7}
-                onPress={() => router.push(item.route as any)}
+                onPress={() => {
+                  if (!isActive) router.push(item.route);
+                }}
               >
                 <Ionicons
-                  name={`${item.icon}-outline` as any}
+                  name={isActive ? item.icon : `${item.icon}-outline`}
                   size={36}
-                  color="#FFFFFF"
+                  color={isActive ? "#E00000" : "#FFFFFF"}
                 />
-                <Text style={styles.navText}>{item.label}</Text>
+                <Text
+                  style={[styles.navText, isActive && styles.navTextActive]}
+                >
+                  {item.label}
+                </Text>
               </TouchableOpacity>
             );
           })}
@@ -168,7 +161,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   navItemActive: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: "#FFFFFF", // white pill behind the active tab
   },
   navText: {
     color: "#FFFFFF",
