@@ -1,6 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { doc, onSnapshot } from "firebase/firestore";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -9,42 +15,96 @@ import {
 } from "react-native";
 import QRCode from "react-native-qrcode-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { db } from "../firebase/firebaseConfig";
 
 const RED = "#CC0A0A";
 const WHITE = "#FFFFFF";
-const DIVIDER = "rgba(255,255,255,0.85)";
 
-const formatDate = (value: string): string => {
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("en-GB", {
+type RegisteredUser = {
+  ownerName?: string;
+  nic?: string;
+  phone?: string;
+  vehicleNumber?: string;
+  vehicleType?: string;
+  fuelType?: string;
+  qrImage?: string;
+  remainingQuota?: number;
+  validUntil?: string;
+  accountStatus?: string;
+};
+
+const formatDate = (value?: string) => {
+  if (!value) return "Not set";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 };
 
-const InfoRow = ({ label, value }: { label: string; value: string }) => (
-  <View style={styles.row}>
-    <Text style={styles.rowLabel}>{label}</Text>
-    <Text style={styles.rowValue}>{value}</Text>
-  </View>
-);
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={styles.rowValue}>{value || "Not available"}</Text>
+    </View>
+  );
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const {
-    vehicleNumber = "WP CAA - 1534",
-    quota = "40",
-    validUntil = "2026-08-26",
-  } = useLocalSearchParams<{
-    vehicleNumber?: string;
-    quota?: string;
-    validUntil?: string;
-  }>();
+  const params = useLocalSearchParams<{ nic?: string }>();
 
-  const qrValue = JSON.stringify({ vehicleNumber });
-  const quotaNum = Number(quota);
+  const { nic } = useLocalSearchParams<{ nic?: string }>();
+
+  const [user, setUser] = useState<RegisteredUser | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    if (!nic) {
+      setLoading(false);
+      Alert.alert("Missing NIC", "No registered user was selected.");
+      return;
+    }
+    const cleanNic = nic.trim().toUpperCase();
+    const userRef = doc(db, "users", nic.trim());
+
+    const unsubscribe = onSnapshot(
+      userRef,
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setUser(snapshot.data() as RegisteredUser);
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Profile fetch error:", error);
+        setLoading(false);
+        Alert.alert("Error", "Could not load the registered user.");
+      },
+    );
+
+    return unsubscribe;
+  }, [nic]);
+
+  useEffect(() => {
+    setImageError(false);
+  }, [user?.qrImage]);
+
+  const vehicleNumber = user?.vehicleNumber || "";
+  const quota = Number(user?.remainingQuota ?? 0);
+
+  const qrValue = JSON.stringify({
+    nic: user?.nic || nic,
+    vehicleNumber,
+  });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -53,39 +113,97 @@ export default function ProfileScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           onPress={() => router.back()}
-          style={styles.backBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.backButton}
           accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={28} color={WHITE} />
+          <Ionicons name="arrow-back" size={27} color={WHITE} />
         </TouchableOpacity>
-        <Text style={styles.title}>Profile</Text>
+
+        <Text style={styles.headerTitle}>Profile</Text>
       </View>
 
-      <View style={styles.qrWrap}>
-        <View style={styles.qrCard}>
-          <QRCode
-            value={qrValue}
-            size={180}
-            color="#000"
-            backgroundColor={WHITE}
-          />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={WHITE} />
+          <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
-      </View>
+      ) : !user ? (
+        <View style={styles.center}>
+          <Ionicons name="person-circle-outline" size={70} color={WHITE} />
+          <Text style={styles.message}>Registered user not found.</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.qrCard}>
+            {user.qrImage ? (
+              <Image
+                source={{ uri: user.qrImage }}
+                style={styles.qrImage}
+                resizeMode="contain"
+                onError={() =>
+                  console.warn("Could not load uploaded QR image.")
+                }
+              />
+            ) : (
+              <QRCode
+                value={qrValue}
+                size={180}
+                color="#000000"
+                backgroundColor={WHITE}
+              />
+            )}
 
-      <View style={styles.details}>
-        <Text style={styles.vehicleLabel}>Vehicle Number</Text>
-        <Text style={styles.vehicleValue}>{vehicleNumber}</Text>
+            <Text style={styles.qrCaption}>
+              {user.qrImage ? "Uploaded QR Image" : "Generated QR Code"}
+            </Text>
+          </View>
 
-        <View style={styles.divider} />
-        <InfoRow
-          label="Available Quota"
-          value={`${isNaN(quotaNum) ? "0.00" : quotaNum.toFixed(2)} L`}
-        />
+          <View style={styles.detailsCard}>
+            <Text style={styles.ownerName}>
+              {user.ownerName || "Registered User"}
+            </Text>
 
-        <View style={styles.divider} />
-        <InfoRow label="Valid Until" value={formatDate(validUntil)} />
-      </View>
+            <Text style={styles.vehicleLabel}>Vehicle Number</Text>
+            <Text style={styles.vehicleNumber}>
+              {vehicleNumber || "Not available"}
+            </Text>
+
+            <View style={styles.divider} />
+
+            <InfoRow label="NIC Number" value={user.nic || nic || ""} />
+
+            <View style={styles.divider} />
+
+            <InfoRow label="Phone Number" value={user.phone || ""} />
+
+            <View style={styles.divider} />
+
+            <InfoRow label="Vehicle Type" value={user.vehicleType || ""} />
+
+            <View style={styles.divider} />
+
+            <InfoRow label="Fuel Type" value={user.fuelType || ""} />
+
+            <View style={styles.divider} />
+
+            <InfoRow
+              label="Available Quota"
+              value={`${Number.isFinite(quota) ? quota.toFixed(2) : "0.00"} L`}
+            />
+
+            <View style={styles.divider} />
+
+            <InfoRow label="Valid Until" value={formatDate(user.validUntil)} />
+
+            <View style={styles.divider} />
+
+            <InfoRow
+              label="Account Status"
+              value={user.accountStatus || "active"}
+            />
+          </View>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -96,61 +214,104 @@ const styles = StyleSheet.create({
     backgroundColor: RED,
   },
   header: {
-    height: 56,
-    alignItems: "center",
+    height: 58,
     justifyContent: "center",
-    marginTop: 8,
+    alignItems: "center",
+    marginTop: 6,
   },
-  backBtn: {
+  backButton: {
     position: "absolute",
     left: 20,
+    padding: 4,
   },
-  title: {
+  headerTitle: {
     color: WHITE,
-    fontSize: 28,
-    fontWeight: "700",
+    fontSize: 27,
+    fontWeight: "800",
   },
-  qrWrap: {
+  content: {
+    paddingHorizontal: 22,
+    paddingTop: 20,
+    paddingBottom: 35,
+  },
+  center: {
+    flex: 1,
+    justifyContent: "center",
     alignItems: "center",
-    marginTop: 24,
+    padding: 24,
+  },
+  loadingText: {
+    color: WHITE,
+    marginTop: 12,
+    fontSize: 16,
+  },
+  message: {
+    color: WHITE,
+    fontSize: 17,
+    marginTop: 12,
+    textAlign: "center",
   },
   qrCard: {
     backgroundColor: WHITE,
     borderRadius: 18,
     padding: 20,
     alignItems: "center",
-    justifyContent: "center",
+    alignSelf: "center",
+    width: 230,
   },
-  details: {
-    marginTop: 48,
-    paddingHorizontal: 28,
+  qrImage: {
+    width: 180,
+    height: 180,
+  },
+  qrCaption: {
+    color: "#555",
+    fontSize: 13,
+    marginTop: 10,
+    textAlign: "center",
+  },
+  detailsCard: {
+    backgroundColor: WHITE,
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 28,
+  },
+  ownerName: {
+    color: "#222",
+    fontSize: 22,
+    fontWeight: "800",
+    marginBottom: 18,
   },
   vehicleLabel: {
-    color: WHITE,
-    fontSize: 18,
+    color: "#666",
+    fontSize: 15,
   },
-  vehicleValue: {
-    color: WHITE,
-    fontSize: 26,
-    fontWeight: "700",
-    marginTop: 4,
+  vehicleNumber: {
+    color: RED,
+    fontSize: 25,
+    fontWeight: "800",
+    marginTop: 5,
   },
   divider: {
-    height: StyleSheet.hairlineWidth * 2,
-    backgroundColor: DIVIDER,
-    marginVertical: 21,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: "#DDD",
+    marginVertical: 16,
   },
-  row: {
+  infoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
+    gap: 12,
   },
   rowLabel: {
-    color: WHITE,
-    fontSize: 20,
+    color: "#555",
+    fontSize: 14,
+    flex: 1,
   },
   rowValue: {
-    color: WHITE,
-    fontSize: 20,
+    color: "#222",
+    fontSize: 14,
+    fontWeight: "600",
+    flex: 1,
+    textAlign: "right",
   },
 });

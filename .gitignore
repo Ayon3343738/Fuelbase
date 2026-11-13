@@ -41,3 +41,4 @@ app-example
 # generated native folders
 /ios
 /android
+admin/fueltrack-admin/serviceAccountKey.json

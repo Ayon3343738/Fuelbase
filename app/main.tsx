@@ -1,6 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
-import { usePathname, useRouter } from "expo-router";
+import { useLocalSearchParams, usePathname, useRouter } from "expo-router";
+import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
+  Alert,
   SafeAreaView,
   StatusBar,
   StyleSheet,
@@ -8,40 +12,113 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { app } from "../firebase/firebaseConfig";
 
-// Change these routes to match your real files in the app folder
-const NAV_ITEMS = [
-  { label: "Home", icon: "home", route: "/" },
-  { label: "Stations", icon: "location", route: "/Stations" },
-  { label: "History", icon: "time", route: "/History" },
-  { label: "Profile", icon: "person", route: "/ProfileScreen" },
+export const db = getFirestore(app);
+
+type IconName = React.ComponentProps<typeof Ionicons>["name"];
+
+const NAV_ITEMS: {
+  label: string;
+  icon: IconName;
+  iconOutline: IconName;
+  route: string;
+}[] = [
+  { label: "Home", icon: "home", iconOutline: "home-outline", route: "/main" },
+  {
+    label: "Stations",
+    icon: "location",
+    iconOutline: "location-outline",
+    route: "/Stations",
+  },
+  {
+    label: "History",
+    icon: "time",
+    iconOutline: "time-outline",
+    route: "/History",
+  },
+  {
+    label: "Profile",
+    icon: "person",
+    iconOutline: "person-outline",
+    route: "/ProfileScreen",
+  },
 ];
 
 export default function MainScreen() {
   const router = useRouter();
   const pathname = usePathname();
+  const { nic } = useLocalSearchParams<{ nic?: string }>();
 
-  const username = "name";
-  const remainingQuata = 20.0;
+  const [username, setUsername] = useState("");
+  const [remainingQuota, setRemainingQuota] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadUserDetails() {
+      if (!nic || typeof nic !== "string") {
+        setLoading(false);
+        return;
+      }
+      try {
+        const userSnapshot = await getDoc(doc(db, "users", nic.trim()));
+        if (userSnapshot.exists()) {
+          const userData = userSnapshot.data();
+          setUsername(userData.ownerName ?? "User");
+          const quota = userData.remainingQuota;
+          setRemainingQuota(
+            typeof quota === "number" && Number.isFinite(quota) ? quota : null,
+          );
+        } else {
+          Alert.alert("User not found");
+        }
+      } catch (error) {
+        console.error("Failed to load user", error);
+        Alert.alert("Error", "Could not load details");
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadUserDetails();
+  }, [nic]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#E00000" />
       <View style={styles.contain}>
         <View style={styles.header}>
-          <Text style={styles.greeting}>Hello, {username}</Text>
+          <Text style={styles.greeting} numberOfLines={1}>
+            Hello, {loading ? "..." : username || "User"}
+          </Text>
         </View>
 
         <View style={styles.content}>
-          <View style={styles.quotacard}>
+          <TouchableOpacity
+            style={styles.quotacard}
+            activeOpacity={0.8}
+            onPress={() =>
+              router.push({
+                pathname: "/Calculation",
+                params: { nic: nic ?? "" },
+              })
+            }
+          >
             <Text style={styles.quatatitle}>Remaining Quota</Text>
-            <Text>{remainingQuata.toFixed(2)}L</Text>
-          </View>
+            {loading ? (
+              <ActivityIndicator color="#E00000" />
+            ) : (
+              <Text style={styles.quotaValue}>
+                {remainingQuota !== null
+                  ? `${remainingQuota.toFixed(2)} L`
+                  : "Quota not available"}
+              </Text>
+            )}
+          </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.trancard}
             activeOpacity={0.8}
-            onPress={() => router.push("/Login")}
+            onPress={() => router.push("/add-transaction")}
           >
             <Text style={styles.tranText}>Add Transaction</Text>
             <View style={styles.tranIcon}>
@@ -59,11 +136,19 @@ export default function MainScreen() {
                 style={[styles.navItem, isActive && styles.navItemActive]}
                 activeOpacity={0.7}
                 onPress={() => {
-                  if (!isActive) router.push(item.route);
+                  if (isActive) return;
+                  if (item.label === "Profile") {
+                    router.push({
+                      pathname: "/ProfileScreen",
+                      params: { nic: nic ?? "" },
+                    });
+                  } else {
+                    router.push(item.route as any);
+                  }
                 }}
               >
                 <Ionicons
-                  name={isActive ? item.icon : `${item.icon}-outline`}
+                  name={isActive ? item.icon : item.iconOutline}
                   size={36}
                   color={isActive ? "#E00000" : "#FFFFFF"}
                 />
@@ -172,5 +257,10 @@ const styles = StyleSheet.create({
   navTextActive: {
     color: "#E00000",
     fontWeight: "700",
+  },
+  quotaValue: {
+    color: "#222222",
+    fontSize: 23,
+    fontWeight: "600",
   },
 });

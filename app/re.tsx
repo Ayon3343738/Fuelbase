@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Image,
@@ -20,6 +20,17 @@ import { app } from "../firebase/firebaseConfig";
 
 const db = getFirestore(app);
 
+const QUOTA_BY_VEHICLE_TYPE: Record<string, number> = {
+  "Motor Cars": 20,
+  "Three-Wheelers": 15,
+  Motorcycles: 5,
+  Buses: 200,
+  "Land Vehicles": 40,
+  Van: 40,
+  "Motor lorry": 1,
+  "Special purpose Vehicles": 40,
+};
+
 export default function Register() {
   const router = useRouter();
 
@@ -30,6 +41,7 @@ export default function Register() {
   const [phone, setPhone] = useState("");
   const [fuelType, setFuelType] = useState("");
   const [qrImage, setQrImge] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const pickImage = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -60,6 +72,16 @@ export default function Register() {
       !qrImage
     ) {
       Alert.alert("Please fill the fields");
+      return;
+    }
+
+    const assignedQuota = QUOTA_BY_VEHICLE_TYPE[vehicleType];
+
+    if (assignedQuota === undefined) {
+      Alert.alert(
+        "Invalid vehicle category",
+        "Please select a valid vehicle category",
+      );
       return;
     }
 
@@ -111,6 +133,7 @@ export default function Register() {
         vehicleType: vehicleType,
         fuelType,
         qrImage,
+        remainingQuota: assignedQuota,
         createdAt: new Date(),
       });
 
