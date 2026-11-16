@@ -99,7 +99,10 @@ export default function MainScreen() {
             onPress={() =>
               router.push({
                 pathname: "/Calculation",
-                params: { nic: nic ?? "" },
+                params: {
+                  nic: nic ?? "",
+                  quota: remainingQuota !== null ? String(remainingQuota) : "",
+                },
               })
             }
           >

@@ -1,7 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -14,6 +15,9 @@ import {
   View,
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
+import { app } from "../firebase/firebaseConfig";
+
+const db = getFirestore(app);
 
 interface DailyDistances {
   Monday: number;
@@ -60,6 +64,16 @@ export default function FuelQuotaScreen() {
   const params = useLocalSearchParams();
 
   const nicParam = Array.isArray(params.nic) ? params.nic[0] : params.nic;
+  const quotaParam = Array.isArray(params.quota)
+    ? params.quota[0]
+    : params.quota;
+
+  const initialQuota =
+    typeof quotaParam === "string" &&
+    quotaParam.trim() !== "" &&
+    Number.isFinite(Number(quotaParam))
+      ? Math.max(0, Number(quotaParam))
+      : 0;
 
   // Separate local storage key for each user.
   const storageKey =
@@ -72,7 +86,8 @@ export default function FuelQuotaScreen() {
   const [dailyDistances, setDailyDistances] =
     useState<DailyDistances>(EMPTY_DISTANCES);
 
-  const [quotaLiters] = useState(20);
+  // Quota liters loaded from MainScreen params / Firestore.
+  const [quotaLiters, setQuotaLiters] = useState<number>(initialQuota);
 
   // Editable fuel consumption.
   const [kmPerLiter, setKmPerLiter] = useState("12");
@@ -82,7 +97,7 @@ export default function FuelQuotaScreen() {
 
   const [saveStatus, setSaveStatus] = useState("Saved");
 
-  // Load previously saved calculation data from this device.
+  // Load previously saved calculation data and user's remainingQuota from Firestore.
   useEffect(() => {
     let active = true;
 
@@ -90,18 +105,30 @@ export default function FuelQuotaScreen() {
       setLoading(true);
       setDataLoaded(false);
 
-      if (!storageKey) {
+      if (!storageKey || typeof nicParam !== "string") {
         setDailyDistances(EMPTY_DISTANCES);
         setKmPerLiter("12");
+        setQuotaLiters(0);
         setSaveStatus("NIC not available");
         setLoading(false);
         return;
       }
 
       try {
-        const savedData = await AsyncStorage.getItem(storageKey);
+        const [savedData, userSnapshot] = await Promise.all([
+          AsyncStorage.getItem(storageKey),
+          getDoc(doc(db, "users", nicParam.trim())),
+        ]);
 
         if (!active) return;
+
+        if (userSnapshot.exists()) {
+          const userData = userSnapshot.data();
+          const quota = userData.remainingQuota;
+          if (typeof quota === "number" && Number.isFinite(quota)) {
+            setQuotaLiters(Math.max(0, quota));
+          }
+        }
 
         if (savedData) {
           const parsed: CalculationData = JSON.parse(savedData);
@@ -145,7 +172,7 @@ export default function FuelQuotaScreen() {
     return () => {
       active = false;
     };
-  }, [storageKey]);
+  }, [storageKey, nicParam]);
 
   // Save the latest calculation data to the device.
   const saveCalculationData = useCallback(async () => {
@@ -256,11 +283,9 @@ export default function FuelQuotaScreen() {
 
   const approxDailyUse = (remainingFuel / daysLeft).toFixed(2);
 
-  // Gauge progress.
-  const progressPercentage = Math.max(
-    0,
-    Math.min(1, remainingFuel / quotaLiters),
-  );
+  // Gauge progress (guarded against division by zero).
+  const progressPercentage =
+    quotaLiters > 0 ? Math.max(0, Math.min(1, remainingFuel / quotaLiters)) : 0;
 
   const strokeDashoffset = CIRCUMFERENCE - CIRCUMFERENCE * progressPercentage;
 
