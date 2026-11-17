@@ -1,734 +1,547 @@
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
+import { onAuthStateChanged } from "firebase/auth";
 import {
-  doc,
-  getDoc,
-  getFirestore,
+  addDoc,
+  collection,
   onSnapshot,
+  query,
   serverTimestamp,
-  setDoc,
+  where,
 } from "firebase/firestore";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import TransactionDatePicker from "../components/TransactionDatePicker";
+import TransactionMap from "../components/TransactionMap";
+
 import {
-  ActivityIndicator,
-  SafeAreaView,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
-  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import Svg, { Path } from "react-native-svg";
-import { app } from "../firebase/firebaseConfig";
 
-const db = getFirestore(app);
+import { auth, db } from "../firebase/firebaseConfig";
 
-interface DailyDistances {
-  Monday: number;
-  Tuesday: number;
-  Wednesday: number;
-  Thursday: number;
-  Friday: number;
-  Saturday: number;
-  Sunday: number;
-}
-
-interface CalculationData {
-  dailyDistances: DailyDistances;
-  kmPerLiter: string;
-}
-
-const EMPTY_DISTANCES: DailyDistances = {
-  Monday: 0,
-  Tuesday: 0,
-  Wednesday: 0,
-  Thursday: 0,
-  Friday: 0,
-  Saturday: 0,
-  Sunday: 0,
+type Coordinates = {
+  latitude: number;
+  longitude: number;
 };
 
-const DAYS_SHORT: { key: keyof DailyDistances; label: string }[] = [
-  { key: "Monday", label: "Mon" },
-  { key: "Tuesday", label: "Tue" },
-  { key: "Wednesday", label: "Wed" },
-  { key: "Thursday", label: "Thu" },
-  { key: "Friday", label: "Fri" },
-  { key: "Saturday", label: "Sat" },
-  { key: "Sunday", label: "Sun" },
-];
+type Transaction = {
+  id: string;
+  date: string;
+  location: string;
+  latitude?: number;
+  longitude?: number;
+  litres: number;
+  amount: number;
+  pricePerLitre?: number;
+};
 
-const RADIUS = 90;
-const STROKE_WIDTH = 12;
-const CIRCUMFERENCE = Math.PI * RADIUS;
-
-export default function FuelQuotaScreen() {
+export default function AddTransaction() {
   const router = useRouter();
-  const params = useLocalSearchParams();
 
-  const nicParam = Array.isArray(params.nic) ? params.nic[0] : params.nic;
+  // Form states
+  const [date, setDate] = useState("");
+  const [location, setLocation] = useState("");
+  const [coordinates, setCoordinates] = useState<Coordinates | null>(null);
 
-  const storageKey =
-    typeof nicParam === "string" && nicParam.trim() !== ""
-      ? `fuel_calculation_${nicParam.trim()}`
-      : null;
+  const [litres, setLitres] = useState("");
+  const [amount, setAmount] = useState("");
 
-  const [loading, setLoading] = useState(true);
-  const [quotaLoading, setQuotaLoading] = useState(true);
-  const [quotaError, setQuotaError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const [dailyDistances, setDailyDistances] =
-    useState<DailyDistances>(EMPTY_DISTANCES);
+  // Picker and map states
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
 
-  const [quotaLiters, setQuotaLiters] = useState(0);
-  const [kmPerLiter, setKmPerLiter] = useState("12");
-  const [dataLoaded, setDataLoaded] = useState(false);
-  const [saveStatus, setSaveStatus] = useState("Saved");
+  // Saved transactions
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
-  // LOAD EXISTING CALCULATION DATA (FIRESTORE FIRST, THEN THIS DEVICE)
-  useEffect(() => {
-    let active = true;
+  // Format date as YYYY-MM-DD
+  const formatDate = (value: Date) => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
 
-    const loadData = async () => {
-      setLoading(true);
-      setDataLoaded(false);
-
-      if (!storageKey) {
-        setDailyDistances(EMPTY_DISTANCES);
-        setKmPerLiter("12");
-        setSaveStatus("NIC not available");
-        setLoading(false);
-        return;
-      }
-
-      try {
-        // 1) Try the account copy in Firestore (same on phone and web)
-        let parsed: CalculationData | null = null;
-
-        try {
-          const remote = await getDoc(
-            doc(db, "fuelCalculations", nicParam!.trim()),
-          );
-          if (remote.exists()) {
-            parsed = remote.data() as CalculationData;
-          }
-        } catch (remoteError) {
-          console.log("Calculation cloud load failed:", remoteError);
-        }
-
-        // 2) Fall back to this device's cache (also migrates old local data up)
-        if (!parsed) {
-          const savedData = await AsyncStorage.getItem(storageKey);
-          if (savedData) parsed = JSON.parse(savedData) as CalculationData;
-        }
-
-        if (!active) return;
-
-        if (parsed) {
-          const savedDistances: Partial<DailyDistances> =
-            parsed.dailyDistances || {};
-
-          setDailyDistances({
-            Monday: Math.max(0, Number(savedDistances.Monday) || 0),
-            Tuesday: Math.max(0, Number(savedDistances.Tuesday) || 0),
-            Wednesday: Math.max(0, Number(savedDistances.Wednesday) || 0),
-            Thursday: Math.max(0, Number(savedDistances.Thursday) || 0),
-            Friday: Math.max(0, Number(savedDistances.Friday) || 0),
-            Saturday: Math.max(0, Number(savedDistances.Saturday) || 0),
-            Sunday: Math.max(0, Number(savedDistances.Sunday) || 0),
-          });
-
-          setKmPerLiter(String(parsed.kmPerLiter ?? "12"));
-        } else {
-          setDailyDistances(EMPTY_DISTANCES);
-          setKmPerLiter("12");
-        }
-
-        setSaveStatus("Saved");
-        setDataLoaded(true);
-      } catch (error) {
-        console.log("Calculation data load failed:", error);
-
-        if (active) {
-          setSaveStatus("Load failed");
-          setDataLoaded(false);
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    loadData();
-
-    return () => {
-      active = false;
-    };
-  }, [storageKey]);
-
-  // LIVE FIRESTORE QUOTA LISTENER
-  useEffect(() => {
-    if (typeof nicParam !== "string" || !nicParam.trim()) {
-      setQuotaError("User NIC is not available.");
-      setQuotaLoading(false);
-      return;
-    }
-
-    setQuotaLoading(true);
-    setQuotaError("");
-
-    let stopQuotaListener: (() => void) | undefined;
-
-    const stopUserListener = onSnapshot(
-      doc(db, "users", nicParam.trim()),
-      (userSnapshot) => {
-        stopQuotaListener?.();
-        stopQuotaListener = undefined;
-
-        if (!userSnapshot.exists()) {
-          setQuotaError("User profile not found.");
-          setQuotaLoading(false);
-          return;
-        }
-
-        const vehicleType = userSnapshot.data().vehicleType;
-
-        if (typeof vehicleType !== "string" || !vehicleType.trim()) {
-          setQuotaError("Vehicle type is missing from your profile.");
-          setQuotaLoading(false);
-          return;
-        }
-
-        stopQuotaListener = onSnapshot(
-          doc(db, "fuelQuotaSettings", vehicleType.trim()),
-          (quotaSnapshot) => {
-            if (!quotaSnapshot.exists()) {
-              setQuotaError(
-                `Fuel quota has not been configured for ${vehicleType}.`,
-              );
-              setQuotaLoading(false);
-              return;
-            }
-
-            const quota = Number(quotaSnapshot.data().quotaLiters);
-
-            if (!Number.isFinite(quota) || quota < 0) {
-              setQuotaError("The configured fuel quota is invalid.");
-              setQuotaLoading(false);
-              return;
-            }
-
-            setQuotaLiters(quota);
-            setQuotaError("");
-            setQuotaLoading(false);
-          },
-          (error) => {
-            console.log("Fuel quota listener failed:", error);
-            setQuotaError("Unable to load your fuel quota.");
-            setQuotaLoading(false);
-          },
-        );
-      },
-      (error) => {
-        console.log("User profile listener failed:", error);
-        setQuotaError("Unable to load your user profile.");
-        setQuotaLoading(false);
-      },
-    );
-
-    return () => {
-      stopUserListener();
-      stopQuotaListener?.();
-    };
-  }, [nicParam]);
-
-  // SAVE CALCULATION DATA (DEVICE CACHE + FIRESTORE)
-  const saveCalculationData = useCallback(async () => {
-    if (!storageKey || !dataLoaded) return;
-
-    const rate = Number(kmPerLiter);
-
-    if (kmPerLiter.trim() === "" || !Number.isFinite(rate) || rate <= 0) {
-      setSaveStatus("Enter a valid Km/L value");
-      return;
-    }
-
-    const dataToSave: CalculationData = {
-      dailyDistances,
-      kmPerLiter,
-    };
-
-    try {
-      setSaveStatus("Saving...");
-      // local cache (works offline)
-      await AsyncStorage.setItem(storageKey, JSON.stringify(dataToSave));
-
-      // account copy (same on phone and web)
-      await setDoc(
-        doc(db, "fuelCalculations", nicParam!.trim()),
-        { ...dataToSave, updatedAt: serverTimestamp() },
-        { merge: true },
-      );
-
-      setSaveStatus("Saved");
-    } catch (error) {
-      console.log("Calculation data save failed:", error);
-      setSaveStatus("Save failed");
-    }
-  }, [storageKey, nicParam, dataLoaded, dailyDistances, kmPerLiter]);
-
-  // AUTO-SAVE AFTER USER STOPS TYPING
-  useEffect(() => {
-    if (!dataLoaded || loading || !storageKey) return;
-
-    const rate = Number(kmPerLiter);
-
-    if (kmPerLiter.trim() === "" || !Number.isFinite(rate) || rate <= 0) {
-      setSaveStatus("Enter a valid Km/L value");
-      return;
-    }
-
-    setSaveStatus("Unsaved changes");
-
-    const timer = setTimeout(() => {
-      saveCalculationData();
-    }, 700);
-
-    return () => clearTimeout(timer);
-  }, [
-    dailyDistances,
-    kmPerLiter,
-    dataLoaded,
-    loading,
-    storageKey,
-    saveCalculationData,
-  ]);
-
-  // CHANGE DAILY DISTANCE
-  const changeDistance = (day: keyof DailyDistances, value: string) => {
-    const cleaned = value.replace(/[^0-9]/g, "");
-    const numValue = cleaned === "" ? 0 : Number(cleaned);
-
-    setDailyDistances((previous) => ({
-      ...previous,
-      [day]: numValue,
-    }));
+    return `${year}-${month}-${day}`;
   };
 
-  // CHANGE FUEL CONSUMPTION
-  const changeKmPerLiter = (value: string) => {
+  // Select date
+  const handleDateSelect = (value: Date) => {
+    setSelectedDate(value);
+    setDate(formatDate(value));
+    setShowDatePicker(false);
+  };
+
+  // Select map location
+  const handleMapSelect = (point: Coordinates, placeName?: string) => {
+    setCoordinates(point);
+
+    setLocation(
+      placeName ||
+        `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`,
+    );
+  };
+
+  // Clean numeric input
+  const cleanNumber = (value: string) => {
     const cleaned = value.replace(/[^0-9.]/g, "");
     const parts = cleaned.split(".");
 
-    const formatted =
-      parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleaned;
+    if (parts.length > 2) {
+      return parts[0] + "." + parts.slice(1).join("");
+    }
 
-    setKmPerLiter(formatted);
+    return cleaned;
   };
 
-  // WEEKLY DISTANCE
-  const weeklyDistance = useMemo(
-    () =>
-      Object.values(dailyDistances).reduce(
-        (total, distance) => total + distance,
-        0,
-      ),
-    [dailyDistances],
-  );
+  // Validate positive numbers with up to two decimal places
+  const validateNumber = (value: string) => {
+    return /^\d+(\.\d{1,2})?$/.test(value) && Number(value) > 0;
+  };
 
-  // FUEL USED
-  const fuelUsed = useMemo(() => {
-    const rate = Number(kmPerLiter);
+  // Load transactions based on authentication state
+  useEffect(() => {
+    let unsubscribeTransactions: (() => void) | undefined;
 
-    if (!Number.isFinite(rate) || rate <= 0) return 0;
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      // Stop previous listener when authentication changes
+      unsubscribeTransactions?.();
+      unsubscribeTransactions = undefined;
 
-    return weeklyDistance / rate;
-  }, [weeklyDistance, kmPerLiter]);
+      if (!user) {
+        setTransactions([]);
+        return;
+      }
 
-  // REMAINING QUOTA — KEEP EXISTING 2 LITRE DEDUCTION
-  const remainingFuel = Math.max(0, quotaLiters - fuelUsed - 2);
+      const transactionQuery = query(
+        collection(db, "transactions"),
+        where("userId", "==", user.uid),
+      );
 
-  const daysLeft = 4;
-  const approxDailyUse = (remainingFuel / daysLeft).toFixed(2);
+      unsubscribeTransactions = onSnapshot(
+        transactionQuery,
+        (snapshot) => {
+          const savedTransactions: Transaction[] = snapshot.docs.map(
+            (document) => {
+              const data = document.data();
 
-  const progressPercentage =
-    quotaLiters > 0 ? Math.max(0, Math.min(1, remainingFuel / quotaLiters)) : 0;
+              return {
+                id: document.id,
+                date: data.date ?? "",
+                location: data.location ?? "",
+                latitude: data.latitude,
+                longitude: data.longitude,
+                litres: Number(data.litres ?? 0),
+                amount: Number(data.amount ?? 0),
+                pricePerLitre:
+                  data.pricePerLitre != null
+                    ? Number(data.pricePerLitre)
+                    : undefined,
+              };
+            },
+          );
 
-  const strokeDashoffset = CIRCUMFERENCE - CIRCUMFERENCE * progressPercentage;
+          savedTransactions.sort((a, b) => b.date.localeCompare(a.date));
 
-  // LOADING
-  if (loading || quotaLoading) {
-    return (
-      <SafeAreaView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
-        <Text style={styles.loadingText}>Loading calculation data...</Text>
-      </SafeAreaView>
-    );
-  }
+          setTransactions(savedTransactions);
 
-  // QUOTA ERROR
-  if (quotaError) {
-    return (
-      <SafeAreaView style={[styles.container, styles.centered]}>
-        <Text style={styles.loadingText}>{quotaError}</Text>
+          console.log("Transactions loaded:", savedTransactions);
+        },
+        (error) => {
+          console.error("Transaction loading error:", error);
 
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={{ marginTop: 20 }}
-        >
-          <Text style={styles.loadingText}>Go back</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
+          Alert.alert(
+            "Error",
+            "Unable to load saved transactions. Please check your connection.",
+          );
+        },
+      );
+    });
+
+    // Cleanup listeners
+    return () => {
+      unsubscribeTransactions?.();
+      unsubscribeAuth();
+    };
+  }, []);
+
+  // Save transaction
+  const addTransaction = async () => {
+    if (!date || !location || !coordinates || !litres || !amount) {
+      Alert.alert("Missing information", "Please complete all fields.");
+      return;
+    }
+
+    if (!validateNumber(amount)) {
+      Alert.alert(
+        "Invalid amount",
+        "Enter a valid positive amount with up to two decimal places.",
+      );
+      return;
+    }
+
+    const user = auth.currentUser;
+
+    if (!user) {
+      Alert.alert("Not logged in", "Please login before adding a transaction.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      await addDoc(collection(db, "transactions"), {
+        userId: user.uid,
+        date,
+        location,
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        litres: Number(litres),
+        amount: Number(amount),
+        createdAt: serverTimestamp(),
+      });
+
+      // Clear form after successful save
+      setDate("");
+      setLocation("");
+      setCoordinates(null);
+      setLitres("");
+      setAmount("");
+
+      setSelectedDate(new Date());
+
+      Alert.alert("Success", "Transaction added successfully.");
+
+      // Firestore listener automatically updates the transaction list.
+    } catch (error) {
+      console.error("Error adding transaction:", error);
+
+      Alert.alert("Error", "Failed to add transaction. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#D30000" />
-
-      {/* HEADER */}
-      <View style={styles.header}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <View>
         <TouchableOpacity
           onPress={() => router.back()}
-          style={styles.backButton}
+          style={styles.backBtn}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={28} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={28} />
         </TouchableOpacity>
-
-        <Text style={styles.headerTitle}>Fuel Quota</Text>
-
-        <View style={{ width: 28 }} />
       </View>
 
       <ScrollView
-        showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
       >
-        {/* DYNAMIC GAUGE */}
-        <View style={styles.gaugeWrapper}>
-          <Svg width={RADIUS * 2 + STROKE_WIDTH} height={RADIUS + STROKE_WIDTH}>
-            <Path
-              d={`M ${STROKE_WIDTH / 2} ${
-                RADIUS + STROKE_WIDTH / 2
-              } A ${RADIUS} ${RADIUS} 0 0 1 ${
-                RADIUS * 2 + STROKE_WIDTH / 2
-              } ${RADIUS + STROKE_WIDTH / 2}`}
-              stroke="rgba(255, 255, 255, 0.3)"
-              strokeWidth={STROKE_WIDTH}
-              fill="none"
-              strokeLinecap="round"
-            />
+        <View style={styles.header}>
+          <Text style={styles.title}>Add Transaction</Text>
 
-            <Path
-              d={`M ${STROKE_WIDTH / 2} ${
-                RADIUS + STROKE_WIDTH / 2
-              } A ${RADIUS} ${RADIUS} 0 0 1 ${
-                RADIUS * 2 + STROKE_WIDTH / 2
-              } ${RADIUS + STROKE_WIDTH / 2}`}
-              stroke="#FFFFFF"
-              strokeWidth={STROKE_WIDTH}
-              fill="none"
-              strokeLinecap="round"
-              strokeDasharray={CIRCUMFERENCE}
-              strokeDashoffset={strokeDashoffset}
-            />
-          </Svg>
-
-          <View style={styles.gaugeTextContainer}>
-            <Text style={styles.gaugeLabel}>Remaining</Text>
-            <Text style={styles.gaugeValue}>{remainingFuel.toFixed(2)} L</Text>
-            <Text style={styles.gaugeSub}>of {quotaLiters.toFixed(2)} L</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.saveButton}
+            onPress={addTransaction}
+            disabled={loading}
+          >
+            <Text style={styles.saveText}>
+              {loading ? "Saving..." : "Save"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* WEEKLY DISTANCE HEADER */}
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Weekly Distance</Text>
+        {/* Transaction form */}
+        <View style={styles.card}>
+          {/* Date */}
+          <TouchableOpacity
+            style={styles.inputContainer}
+            onPress={() => setShowDatePicker(true)}
+            disabled={loading}
+          >
+            <Text style={styles.input}>{date || "Select Date"}</Text>
 
-          <View style={styles.kmPill}>
-            <TextInput
-              style={styles.kmPillInput}
-              value={kmPerLiter}
-              onChangeText={changeKmPerLiter}
-              keyboardType="decimal-pad"
-              maxLength={6}
-              selectTextOnFocus
-              onBlur={saveCalculationData}
-            />
-            <Text style={styles.kmPillText}>Km/L</Text>
-          </View>
-        </View>
+            <Ionicons name="calendar-outline" size={30} color="white" />
+          </TouchableOpacity>
 
-        {/* SAVE STATUS */}
-        <Text style={styles.saveStatus}>
-          {saveStatus === "Saved"
-            ? "✓ All changes saved on this device"
-            : saveStatus}
-        </Text>
-
-        {/* DAYS LIST */}
-        <View style={styles.daysList}>
-          {DAYS_SHORT.map((day) => (
-            <View key={day.key} style={styles.dayRow}>
-              <Text style={styles.dayName}>{day.label}</Text>
-
-              <View style={styles.inputWrapper}>
-                <TextInput
-                  style={styles.dayInput}
-                  value={String(dailyDistances[day.key])}
-                  onChangeText={(value) => changeDistance(day.key, value)}
-                  keyboardType="number-pad"
-                  maxLength={3}
-                  selectTextOnFocus
-                  onBlur={saveCalculationData}
-                />
-              </View>
-
-              <Text style={styles.kmLabel}>KM</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* TOTALS */}
-        <View style={styles.totalsContainer}>
-          <Text style={styles.totalText}>
-            Total Distance :{" "}
-            <Text style={styles.totalBold}>{weeklyDistance} Km</Text>
-          </Text>
-
-          <Text style={styles.totalText}>
-            Fuel Used :{" "}
-            <Text style={styles.totalBold}>{fuelUsed.toFixed(2)} L</Text>
-          </Text>
-        </View>
-
-        <View style={{ flex: 1, minHeight: 40 }} />
-
-        {/* BOTTOM BANNER */}
-        <View style={styles.bottomBanner}>
-          <Ionicons
-            name="alert-circle-outline"
-            size={26}
-            color="#D30000"
-            style={{ marginTop: 2 }}
+          <TransactionDatePicker
+            visible={showDatePicker}
+            value={selectedDate}
+            onChange={handleDateSelect}
+            onClose={() => setShowDatePicker(false)}
           />
 
-          <Text style={styles.bannerText}>
-            You can use approximately{" "}
-            <Text style={styles.bannerBold}>{approxDailyUse} L</Text> and you
-            got <Text style={styles.bannerBold}>{daysLeft} Days</Text>
-          </Text>
+          {/* Location */}
+          <TouchableOpacity
+            style={styles.inputContainer}
+            onPress={() => setShowMap(true)}
+            disabled={loading}
+          >
+            <Text style={styles.input} numberOfLines={1}>
+              {location || "Select Fuel Station Location"}
+            </Text>
+
+            <Ionicons name="location" size={30} color="white" />
+          </TouchableOpacity>
+
+          <TransactionMap
+            visible={showMap}
+            coordinates={coordinates}
+            onSelect={handleMapSelect}
+            onClose={() => setShowMap(false)}
+          />
+
+          {/* Litres and Amount */}
+          <View style={styles.row}>
+            <View style={[styles.smallInputContainer, { marginRight: 15 }]}>
+              <TextInput
+                style={styles.smallInput}
+                placeholder="Litres"
+                placeholderTextColor="white"
+                keyboardType="decimal-pad"
+                value={litres}
+                onChangeText={(value) => setLitres(cleanNumber(value))}
+                editable={!loading}
+              />
+
+              <Text style={styles.unit}>L</Text>
+            </View>
+
+            <View style={styles.smallInputContainer}>
+              <Text style={styles.rupee}>Rs.</Text>
+
+              <TextInput
+                style={styles.amountInput}
+                placeholder="Amount"
+                placeholderTextColor="white"
+                keyboardType="decimal-pad"
+                value={amount}
+                onChangeText={(value) => setAmount(cleanNumber(value))}
+                editable={!loading}
+              />
+            </View>
+          </View>
+
+          {/* Add Button */}
+          <TouchableOpacity
+            style={[styles.addButton, loading && { opacity: 0.6 }]}
+            onPress={addTransaction}
+            disabled={loading}
+          >
+            <Ionicons name="add" size={30} color="white" />
+
+            <Text style={styles.addText}>{loading ? "Adding..." : "Add"}</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Saved Transactions */}
+        <View style={styles.transactionList}>
+          {transactions.map((item) => (
+            <View key={item.id} style={styles.transactionItem}>
+              <Text style={styles.transactionDate}>{item.date}</Text>
+
+              <Text style={styles.transactionLocation}>{item.location}</Text>
+
+              <Text style={styles.transactionDetails}>
+                {item.litres.toFixed(2)} L
+              </Text>
+
+              <Text style={styles.transactionAmount}>
+                Rs. {item.amount.toFixed(2)}
+              </Text>
+            </View>
+          ))}
+
+          {transactions.length === 0 && (
+            <Text style={styles.emptyTransactions}>
+              No transactions added yet.
+            </Text>
+          )}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#D30000",
+    backgroundColor: "#df0000",
+    borderRadius: 28,
   },
 
-  centered: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  loadingText: {
-    color: "#FFFFFF",
-    marginTop: 12,
-    fontSize: 14,
-    textAlign: "center",
-    paddingHorizontal: 20,
+  scroll: {
+    paddingTop: 25,
+    paddingBottom: 40,
   },
 
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    paddingHorizontal: 15,
+  },
+
+  title: {
+    color: "white",
+    fontSize: 25,
+    fontWeight: "800",
+    marginTop: 30,
+  },
+
+  saveButton: {
+    backgroundColor: "white",
     paddingHorizontal: 20,
-    paddingTop: 15,
-    paddingBottom: 10,
+    paddingVertical: 8,
+    borderRadius: 30,
   },
 
-  backButton: {
-    padding: 5,
-  },
-
-  headerTitle: {
-    color: "#FFFFFF",
-    fontSize: 22,
-    fontWeight: "700",
-  },
-
-  scroll: {
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-  },
-
-  gaugeWrapper: {
-    alignItems: "center",
-    justifyContent: "center",
-    height: 160,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-
-  gaugeTextContainer: {
-    position: "absolute",
-    top: 55,
-    alignItems: "center",
-  },
-
-  gaugeLabel: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "600",
-    marginBottom: 2,
-  },
-
-  gaugeValue: {
-    color: "#FFFFFF",
-    fontSize: 36,
+  saveText: {
+    color: "#a80000",
+    fontSize: 18,
     fontWeight: "800",
   },
 
-  gaugeSub: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "600",
+  card: {
+    backgroundColor: "white",
+    marginHorizontal: 20,
+    marginTop: 70,
+    borderRadius: 15,
+    padding: 15,
+  },
+
+  inputContainer: {
+    height: 50,
+    backgroundColor: "#d90000",
+    borderRadius: 25,
+    marginBottom: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+
+  input: {
+    flex: 1,
+    color: "white",
+    fontSize: 19,
+  },
+
+  row: {
+    flexDirection: "row",
+  },
+
+  smallInputContainer: {
+    flex: 1,
+    height: 55,
+    backgroundColor: "#d90000",
+    borderRadius: 25,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+
+  smallInput: {
+    flex: 1,
+    color: "white",
+    fontSize: 20,
+    minWidth: 0,
+  },
+
+  unit: {
+    color: "white",
+    fontSize: 20,
+  },
+
+  rupee: {
+    color: "white",
+    fontSize: 18,
+    marginRight: 5,
+  },
+
+  amountInput: {
+    flex: 1,
+    color: "white",
+    fontSize: 18,
+    minWidth: 0,
+  },
+
+  addButton: {
+    backgroundColor: "#d90000",
+    alignSelf: "flex-end",
+    marginTop: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 25,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  addText: {
+    color: "white",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+
+  // Transaction list styles
+  transactionList: {
+    marginHorizontal: 26,
+    marginTop: 20,
+    paddingBottom: 20,
+  },
+
+  transactionItem: {
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "rgba(255,255,255,0.6)",
+    paddingVertical: 8,
+    marginBottom: 5,
+  },
+
+  transactionDate: {
+    color: "white",
+    fontSize: 13,
+    fontWeight: "bold",
+  },
+
+  transactionLocation: {
+    color: "white",
+    fontSize: 12,
     marginTop: 2,
   },
 
-  sectionHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-    marginTop: 10,
-  },
-
-  sectionTitle: {
-    color: "#FFFFFF",
-    fontSize: 20,
-    fontWeight: "600",
-  },
-
-  kmPill: {
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  kmPillText: {
-    color: "#D30000",
-    fontWeight: "700",
-    fontSize: 14,
-  },
-
-  kmPillInput: {
-    color: "#D30000",
-    fontWeight: "700",
-    fontSize: 14,
-    minWidth: 35,
-    maxWidth: 55,
-    textAlign: "center",
-    padding: 0,
-    marginRight: 3,
-  },
-
-  saveStatus: {
-    color: "#FFFFFF",
+  transactionDetails: {
+    color: "white",
     fontSize: 12,
-    textAlign: "right",
-    marginTop: -12,
-    marginBottom: 12,
+    marginTop: 2,
   },
 
-  daysList: {
-    marginBottom: 20,
+  transactionAmount: {
+    color: "white",
+    fontSize: 13,
+    marginTop: 2,
   },
 
-  dayRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-
-  dayName: {
-    color: "#FFFFFF",
-    width: 50,
-    fontSize: 15,
-    fontWeight: "500",
-  },
-
-  inputWrapper: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 15,
-    width: 60,
-    height: 30,
-    justifyContent: "center",
-    alignItems: "center",
-    marginHorizontal: 15,
-  },
-
-  dayInput: {
-    color: "#D30000",
-    fontSize: 16,
-    fontWeight: "700",
+  emptyTransactions: {
+    color: "white",
     textAlign: "center",
-    width: "100%",
-    height: "100%",
-    padding: 0,
+    marginTop: 15,
   },
 
-  kmLabel: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-
-  totalsContainer: {
-    marginTop: 10,
-    marginBottom: 10,
-  },
-
-  totalText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    marginBottom: 8,
-  },
-
-  totalBold: {
-    fontWeight: "800",
-  },
-
-  bottomBanner: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 16,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginTop: 20,
-  },
-
-  bannerText: {
-    color: "#D30000",
-    fontSize: 15,
-    fontWeight: "600",
-    flex: 1,
-    marginLeft: 10,
-    lineHeight: 22,
-  },
-
-  bannerBold: {
-    fontWeight: "800",
+  backBtn: {
+    position: "absolute",
+    left: 20,
   },
 });
