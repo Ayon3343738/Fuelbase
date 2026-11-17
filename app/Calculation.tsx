@@ -1,10 +1,18 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getFirestore, onSnapshot } from "firebase/firestore";
+import { useRouter } from "expo-router";
+import {
+  doc,
+  getDoc,
+  getFirestore,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -13,9 +21,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { app } from "../firebase/firebaseConfig";
+import { useNic } from "../hooks/use-nic";
 
 const db = getFirestore(app);
 
@@ -60,9 +68,7 @@ const CIRCUMFERENCE = Math.PI * RADIUS;
 
 export default function FuelQuotaScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
-
-  const nicParam = Array.isArray(params.nic) ? params.nic[0] : params.nic;
+  const { nic: nicParam, ready: nicReady } = useNic();
 
   const storageKey =
     typeof nicParam === "string" && nicParam.trim() !== ""
@@ -81,9 +87,11 @@ export default function FuelQuotaScreen() {
   const [dataLoaded, setDataLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState("Saved");
 
-  // LOAD EXISTING CALCULATION DATA FROM THIS DEVICE
+  // LOAD EXISTING CALCULATION DATA (FIRESTORE FIRST, THEN THIS DEVICE)
   useEffect(() => {
     let active = true;
+
+    if (!nicReady) return;
 
     const loadData = async () => {
       setLoading(true);
@@ -98,13 +106,29 @@ export default function FuelQuotaScreen() {
       }
 
       try {
-        const savedData = await AsyncStorage.getItem(storageKey);
+        // 1) Try the account copy in Firestore (same on phone and web)
+        let parsed: CalculationData | null = null;
+
+        try {
+          const remote = await getDoc(doc(db, "fuelCalculations", nicParam!.trim()));
+          if (remote.exists()) {
+            parsed = remote.data() as CalculationData;
+          }
+        } catch (remoteError) {
+          console.log("Calculation cloud load failed:", remoteError);
+        }
+
+        // 2) Fall back to this device's cache (also migrates old local data up)
+        if (!parsed) {
+          const savedData = await AsyncStorage.getItem(storageKey);
+          if (savedData) parsed = JSON.parse(savedData) as CalculationData;
+        }
 
         if (!active) return;
 
-        if (savedData) {
-          const parsed: CalculationData = JSON.parse(savedData);
-          const savedDistances = parsed.dailyDistances || {};
+        if (parsed) {
+          const savedDistances: Partial<DailyDistances> =
+            parsed.dailyDistances || {};
 
           setDailyDistances({
             Monday: Math.max(0, Number(savedDistances.Monday) || 0),
@@ -141,10 +165,12 @@ export default function FuelQuotaScreen() {
     return () => {
       active = false;
     };
-  }, [storageKey]);
+  }, [storageKey, nicReady]);
 
   // LIVE FIRESTORE QUOTA LISTENER
   useEffect(() => {
+    if (!nicReady) return;
+
     if (typeof nicParam !== "string" || !nicParam.trim()) {
       setQuotaError("User NIC is not available.");
       setQuotaLoading(false);
@@ -217,9 +243,9 @@ export default function FuelQuotaScreen() {
       stopUserListener();
       stopQuotaListener?.();
     };
-  }, [nicParam]);
+  }, [nicParam, nicReady]);
 
-  // SAVE CALCULATION DATA TO THIS DEVICE
+  // SAVE CALCULATION DATA (DEVICE CACHE + FIRESTORE)
   const saveCalculationData = useCallback(async () => {
     if (!storageKey || !dataLoaded) return;
 
@@ -237,13 +263,22 @@ export default function FuelQuotaScreen() {
 
     try {
       setSaveStatus("Saving...");
+      // local cache (works offline)
       await AsyncStorage.setItem(storageKey, JSON.stringify(dataToSave));
+
+      // account copy (same on phone and web)
+      await setDoc(
+        doc(db, "fuelCalculations", nicParam!.trim()),
+        { ...dataToSave, updatedAt: serverTimestamp() },
+        { merge: true },
+      );
+
       setSaveStatus("Saved");
     } catch (error) {
       console.log("Calculation data save failed:", error);
       setSaveStatus("Save failed");
     }
-  }, [storageKey, dataLoaded, dailyDistances, kmPerLiter]);
+  }, [storageKey, nicParam, dataLoaded, dailyDistances, kmPerLiter]);
 
   // AUTO-SAVE AFTER USER STOPS TYPING
   useEffect(() => {

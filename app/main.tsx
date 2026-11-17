@@ -1,18 +1,19 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, usePathname, useRouter } from "expo-router";
+import { usePathname, useRouter } from "expo-router";
 import { doc, getFirestore, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { app } from "../firebase/firebaseConfig";
+import { useNic } from "../hooks/use-nic";
 
 export const db = getFirestore(app);
 
@@ -48,7 +49,7 @@ const NAV_ITEMS: {
 export default function MainScreen() {
   const router = useRouter();
   const pathname = usePathname();
-  const { nic } = useLocalSearchParams<{ nic?: string }>();
+  const { nic, ready: nicReady } = useNic();
 
   const [username, setUsername] = useState("");
   const [remainingQuota, setRemainingQuota] = useState<number | null>(null);
@@ -56,6 +57,8 @@ export default function MainScreen() {
   const [quotaLoading, setQuotaLoading] = useState(true);
 
   useEffect(() => {
+    if (!nicReady) return;
+
     if (!nic || typeof nic !== "string" || !nic.trim()) {
       setLoading(false);
       setQuotaLoading(false);
@@ -138,7 +141,7 @@ export default function MainScreen() {
       stopUserListener();
       stopQuotaListener?.();
     };
-  }, [nic]);
+  }, [nic, nicReady]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -201,14 +204,10 @@ export default function MainScreen() {
                 onPress={() => {
                   if (isActive) return;
 
-                  if (item.label === "Profile") {
-                    router.push({
-                      pathname: "/ProfileScreen",
-                      params: { nic: nic ?? "" },
-                    });
-                  } else {
-                    router.push(item.route as any);
-                  }
+                  router.push({
+                    pathname: item.route as any,
+                    params: { nic: nic ?? "" },
+                  });
                 }}
               >
                 <Ionicons
