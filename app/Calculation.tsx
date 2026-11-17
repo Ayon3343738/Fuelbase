@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { doc, getFirestore, onSnapshot } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -54,7 +54,6 @@ const DAYS_SHORT: { key: keyof DailyDistances; label: string }[] = [
   { key: "Sunday", label: "Sun" },
 ];
 
-// Gauge configuration
 const RADIUS = 90;
 const STROKE_WIDTH = 12;
 const CIRCUMFERENCE = Math.PI * RADIUS;
@@ -64,40 +63,25 @@ export default function FuelQuotaScreen() {
   const params = useLocalSearchParams();
 
   const nicParam = Array.isArray(params.nic) ? params.nic[0] : params.nic;
-  const quotaParam = Array.isArray(params.quota)
-    ? params.quota[0]
-    : params.quota;
 
-  const initialQuota =
-    typeof quotaParam === "string" &&
-    quotaParam.trim() !== "" &&
-    Number.isFinite(Number(quotaParam))
-      ? Math.max(0, Number(quotaParam))
-      : 0;
-
-  // Separate local storage key for each user.
   const storageKey =
     typeof nicParam === "string" && nicParam.trim() !== ""
       ? `fuel_calculation_${nicParam.trim()}`
       : null;
 
   const [loading, setLoading] = useState(true);
+  const [quotaLoading, setQuotaLoading] = useState(true);
+  const [quotaError, setQuotaError] = useState("");
 
   const [dailyDistances, setDailyDistances] =
     useState<DailyDistances>(EMPTY_DISTANCES);
 
-  // Quota liters loaded from MainScreen params / Firestore.
-  const [quotaLiters, setQuotaLiters] = useState<number>(initialQuota);
-
-  // Editable fuel consumption.
+  const [quotaLiters, setQuotaLiters] = useState(0);
   const [kmPerLiter, setKmPerLiter] = useState("12");
-
-  // Prevent saving before previous data has loaded.
   const [dataLoaded, setDataLoaded] = useState(false);
-
   const [saveStatus, setSaveStatus] = useState("Saved");
 
-  // Load previously saved calculation data and user's remainingQuota from Firestore.
+  // LOAD EXISTING CALCULATION DATA FROM THIS DEVICE
   useEffect(() => {
     let active = true;
 
@@ -105,34 +89,21 @@ export default function FuelQuotaScreen() {
       setLoading(true);
       setDataLoaded(false);
 
-      if (!storageKey || typeof nicParam !== "string") {
+      if (!storageKey) {
         setDailyDistances(EMPTY_DISTANCES);
         setKmPerLiter("12");
-        setQuotaLiters(0);
         setSaveStatus("NIC not available");
         setLoading(false);
         return;
       }
 
       try {
-        const [savedData, userSnapshot] = await Promise.all([
-          AsyncStorage.getItem(storageKey),
-          getDoc(doc(db, "users", nicParam.trim())),
-        ]);
+        const savedData = await AsyncStorage.getItem(storageKey);
 
         if (!active) return;
 
-        if (userSnapshot.exists()) {
-          const userData = userSnapshot.data();
-          const quota = userData.remainingQuota;
-          if (typeof quota === "number" && Number.isFinite(quota)) {
-            setQuotaLiters(Math.max(0, quota));
-          }
-        }
-
         if (savedData) {
           const parsed: CalculationData = JSON.parse(savedData);
-
           const savedDistances = parsed.dailyDistances || {};
 
           setDailyDistances({
@@ -161,9 +132,7 @@ export default function FuelQuotaScreen() {
           setDataLoaded(false);
         }
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     };
 
@@ -172,13 +141,87 @@ export default function FuelQuotaScreen() {
     return () => {
       active = false;
     };
-  }, [storageKey, nicParam]);
+  }, [storageKey]);
 
-  // Save the latest calculation data to the device.
-  const saveCalculationData = useCallback(async () => {
-    if (!storageKey || !dataLoaded) {
+  // LIVE FIRESTORE QUOTA LISTENER
+  useEffect(() => {
+    if (typeof nicParam !== "string" || !nicParam.trim()) {
+      setQuotaError("User NIC is not available.");
+      setQuotaLoading(false);
       return;
     }
+
+    setQuotaLoading(true);
+    setQuotaError("");
+
+    let stopQuotaListener: (() => void) | undefined;
+
+    const stopUserListener = onSnapshot(
+      doc(db, "users", nicParam.trim()),
+      (userSnapshot) => {
+        stopQuotaListener?.();
+        stopQuotaListener = undefined;
+
+        if (!userSnapshot.exists()) {
+          setQuotaError("User profile not found.");
+          setQuotaLoading(false);
+          return;
+        }
+
+        const vehicleType = userSnapshot.data().vehicleType;
+
+        if (typeof vehicleType !== "string" || !vehicleType.trim()) {
+          setQuotaError("Vehicle type is missing from your profile.");
+          setQuotaLoading(false);
+          return;
+        }
+
+        stopQuotaListener = onSnapshot(
+          doc(db, "fuelQuotaSettings", vehicleType.trim()),
+          (quotaSnapshot) => {
+            if (!quotaSnapshot.exists()) {
+              setQuotaError(
+                `Fuel quota has not been configured for ${vehicleType}.`,
+              );
+              setQuotaLoading(false);
+              return;
+            }
+
+            const quota = Number(quotaSnapshot.data().quotaLiters);
+
+            if (!Number.isFinite(quota) || quota < 0) {
+              setQuotaError("The configured fuel quota is invalid.");
+              setQuotaLoading(false);
+              return;
+            }
+
+            setQuotaLiters(quota);
+            setQuotaError("");
+            setQuotaLoading(false);
+          },
+          (error) => {
+            console.log("Fuel quota listener failed:", error);
+            setQuotaError("Unable to load your fuel quota.");
+            setQuotaLoading(false);
+          },
+        );
+      },
+      (error) => {
+        console.log("User profile listener failed:", error);
+        setQuotaError("Unable to load your user profile.");
+        setQuotaLoading(false);
+      },
+    );
+
+    return () => {
+      stopUserListener();
+      stopQuotaListener?.();
+    };
+  }, [nicParam]);
+
+  // SAVE CALCULATION DATA TO THIS DEVICE
+  const saveCalculationData = useCallback(async () => {
+    if (!storageKey || !dataLoaded) return;
 
     const rate = Number(kmPerLiter);
 
@@ -194,9 +237,7 @@ export default function FuelQuotaScreen() {
 
     try {
       setSaveStatus("Saving...");
-
       await AsyncStorage.setItem(storageKey, JSON.stringify(dataToSave));
-
       setSaveStatus("Saved");
     } catch (error) {
       console.log("Calculation data save failed:", error);
@@ -204,11 +245,9 @@ export default function FuelQuotaScreen() {
     }
   }, [storageKey, dataLoaded, dailyDistances, kmPerLiter]);
 
-  // Automatically save after the user stops typing.
+  // AUTO-SAVE AFTER USER STOPS TYPING
   useEffect(() => {
-    if (!dataLoaded || loading || !storageKey) {
-      return;
-    }
+    if (!dataLoaded || loading || !storageKey) return;
 
     const rate = Number(kmPerLiter);
 
@@ -233,10 +272,9 @@ export default function FuelQuotaScreen() {
     saveCalculationData,
   ]);
 
-  // Change daily distance.
+  // CHANGE DAILY DISTANCE
   const changeDistance = (day: keyof DailyDistances, value: string) => {
     const cleaned = value.replace(/[^0-9]/g, "");
-
     const numValue = cleaned === "" ? 0 : Number(cleaned);
 
     setDailyDistances((previous) => ({
@@ -245,10 +283,9 @@ export default function FuelQuotaScreen() {
     }));
   };
 
-  // Change fuel consumption.
+  // CHANGE FUEL CONSUMPTION
   const changeKmPerLiter = (value: string) => {
     const cleaned = value.replace(/[^0-9.]/g, "");
-
     const parts = cleaned.split(".");
 
     const formatted =
@@ -257,43 +294,58 @@ export default function FuelQuotaScreen() {
     setKmPerLiter(formatted);
   };
 
-  // Weekly distance calculation.
-  const weeklyDistance = useMemo(() => {
-    return Object.values(dailyDistances).reduce(
-      (total, distance) => total + distance,
-      0,
-    );
-  }, [dailyDistances]);
+  // WEEKLY DISTANCE
+  const weeklyDistance = useMemo(
+    () =>
+      Object.values(dailyDistances).reduce(
+        (total, distance) => total + distance,
+        0,
+      ),
+    [dailyDistances],
+  );
 
-  // Fuel consumption calculation.
+  // FUEL USED
   const fuelUsed = useMemo(() => {
     const rate = Number(kmPerLiter);
 
-    if (!Number.isFinite(rate) || rate <= 0) {
-      return 0;
-    }
+    if (!Number.isFinite(rate) || rate <= 0) return 0;
 
     return weeklyDistance / rate;
   }, [weeklyDistance, kmPerLiter]);
 
-  // Existing quota calculation.
+  // REMAINING QUOTA — KEEP EXISTING 2 LITRE DEDUCTION
   const remainingFuel = Math.max(0, quotaLiters - fuelUsed - 2);
 
   const daysLeft = 4;
-
   const approxDailyUse = (remainingFuel / daysLeft).toFixed(2);
 
-  // Gauge progress (guarded against division by zero).
   const progressPercentage =
     quotaLiters > 0 ? Math.max(0, Math.min(1, remainingFuel / quotaLiters)) : 0;
 
   const strokeDashoffset = CIRCUMFERENCE - CIRCUMFERENCE * progressPercentage;
 
-  if (loading) {
+  // LOADING
+  if (loading || quotaLoading) {
     return (
       <SafeAreaView style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#FFFFFF" />
         <Text style={styles.loadingText}>Loading calculation data...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  // QUOTA ERROR
+  if (quotaError) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <Text style={styles.loadingText}>{quotaError}</Text>
+
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ marginTop: 20 }}
+        >
+          <Text style={styles.loadingText}>Go back</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -320,10 +372,9 @@ export default function FuelQuotaScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
       >
-        {/* DYNAMIC SVG GAUGE */}
+        {/* DYNAMIC GAUGE */}
         <View style={styles.gaugeWrapper}>
           <Svg width={RADIUS * 2 + STROKE_WIDTH} height={RADIUS + STROKE_WIDTH}>
-            {/* Background Arc */}
             <Path
               d={`M ${STROKE_WIDTH / 2} ${
                 RADIUS + STROKE_WIDTH / 2
@@ -336,7 +387,6 @@ export default function FuelQuotaScreen() {
               strokeLinecap="round"
             />
 
-            {/* Foreground Arc */}
             <Path
               d={`M ${STROKE_WIDTH / 2} ${
                 RADIUS + STROKE_WIDTH / 2
@@ -352,12 +402,9 @@ export default function FuelQuotaScreen() {
             />
           </Svg>
 
-          {/* Gauge Text */}
           <View style={styles.gaugeTextContainer}>
             <Text style={styles.gaugeLabel}>Remaining</Text>
-
             <Text style={styles.gaugeValue}>{remainingFuel.toFixed(2)} L</Text>
-
             <Text style={styles.gaugeSub}>of {quotaLiters.toFixed(2)} L</Text>
           </View>
         </View>
@@ -366,7 +413,6 @@ export default function FuelQuotaScreen() {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Weekly Distance</Text>
 
-          {/* EDITABLE FUEL CONSUMPTION */}
           <View style={styles.kmPill}>
             <TextInput
               style={styles.kmPillInput}
@@ -377,7 +423,6 @@ export default function FuelQuotaScreen() {
               selectTextOnFocus
               onBlur={saveCalculationData}
             />
-
             <Text style={styles.kmPillText}>Km/L</Text>
           </View>
         </View>
@@ -462,6 +507,8 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     marginTop: 12,
     fontSize: 14,
+    textAlign: "center",
+    paddingHorizontal: 20,
   },
 
   header: {
@@ -488,7 +535,6 @@ const styles = StyleSheet.create({
     paddingBottom: 30,
   },
 
-  // GAUGE STYLES
   gaugeWrapper: {
     alignItems: "center",
     justifyContent: "center",
@@ -523,7 +569,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // WEEKLY DISTANCE SECTION
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -573,7 +618,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-  // DAYS LIST
   daysList: {
     marginBottom: 20,
   },
@@ -617,7 +661,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  // TOTALS
   totalsContainer: {
     marginTop: 10,
     marginBottom: 10,
@@ -633,7 +676,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
-  // BOTTOM BANNER
   bottomBanner: {
     backgroundColor: "#FFFFFF",
     borderRadius: 20,

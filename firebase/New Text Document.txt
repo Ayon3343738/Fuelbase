@@ -1,0 +1,81 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.admin == true;
+    }
+
+    function isOwner() {
+      return request.auth != null
+        && resource.data.phoneE164 == request.auth.token.phone_number;
+    }
+
+    // ---------- users ----------
+    match /users/{userId} {
+      allow read: if isAdmin() || isOwner();
+
+      // Registration happens BEFORE phone login, so the user is not
+      // signed in yet. Allow only a well-formed NEW profile (create never
+      // matches an existing doc, so nobody can overwrite a NIC).
+      allow create: if request.resource.data.keys().hasOnly([
+            'ownerName', 'nic', 'phone', 'phoneE164', 'vehicleNumber',
+            'vehicleType', 'fuelType', 'qrImageUrl', 'remainingQuota',
+            'createdAt', 'authUid'
+          ])
+        && request.resource.data.nic == userId
+        && request.resource.data.phoneE164 is string
+        && request.resource.data.phoneE164.matches('^\\+947[0-9]{8}$')
+        && request.resource.data.remainingQuota is number
+        && request.resource.data.remainingQuota <= 200
+        && !('authUid' in request.resource.data);
+
+      // After OTP login the app links the Firebase uid to the profile
+      allow update: if isAdmin()
+        || (
+          isOwner()
+          && request.resource.data.diff(resource.data)
+              .affectedKeys().hasOnly(['authUid'])
+          && request.resource.data.authUid == request.auth.uid
+        );
+
+      allow delete: if isAdmin();
+    }
+
+    // ---------- uniqueness indexes (nic / phone / vehicle) ----------
+    // Only single-document `get` (existence check) is allowed, never `list`,
+    // so the whole index can't be dumped.
+    match /nicIndex/{id} {
+      allow get: if true;
+      allow create: if request.resource.data.keys().hasOnly(['exist'])
+                    && request.resource.data.exist == true;
+      allow update, delete: if isAdmin();
+    }
+    match /phoneIndex/{id} {
+      allow get: if true;
+      allow create: if request.resource.data.keys().hasOnly(['exist'])
+                    && request.resource.data.exist == true;
+      allow update, delete: if isAdmin();
+    }
+    match /vehicleIndex/{id} {
+      allow get: if true;
+      allow create: if request.resource.data.keys().hasOnly(['exist'])
+                    && request.resource.data.exist == true;
+      allow update, delete: if isAdmin();
+    }
+
+    // ---------- transactions ----------
+    match /transactions/{transactionId} {
+      allow read: if isAdmin()
+        || (request.auth != null && resource.data.userId == request.auth.uid);
+
+      // add-transaction.tsx writes userId = auth uid
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+
+      allow delete: if isAdmin();
+    }
+  }
+}

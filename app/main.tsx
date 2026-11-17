@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, usePathname, useRouter } from "expo-router";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { doc, getFirestore, onSnapshot } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -53,38 +53,97 @@ export default function MainScreen() {
   const [username, setUsername] = useState("");
   const [remainingQuota, setRemainingQuota] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [quotaLoading, setQuotaLoading] = useState(true);
 
   useEffect(() => {
-    async function loadUserDetails() {
-      if (!nic || typeof nic !== "string") {
-        setLoading(false);
-        return;
-      }
-      try {
-        const userSnapshot = await getDoc(doc(db, "users", nic.trim()));
-        if (userSnapshot.exists()) {
-          const userData = userSnapshot.data();
-          setUsername(userData.ownerName ?? "User");
-          const quota = userData.remainingQuota;
-          setRemainingQuota(
-            typeof quota === "number" && Number.isFinite(quota) ? quota : null,
-          );
-        } else {
-          Alert.alert("User not found");
-        }
-      } catch (error) {
-        console.error("Failed to load user", error);
-        Alert.alert("Error", "Could not load details");
-      } finally {
-        setLoading(false);
-      }
+    if (!nic || typeof nic !== "string" || !nic.trim()) {
+      setLoading(false);
+      setQuotaLoading(false);
+      Alert.alert("Error", "User NIC is missing.");
+      return;
     }
-    loadUserDetails();
+
+    setLoading(true);
+    setQuotaLoading(true);
+
+    let stopQuotaListener: (() => void) | undefined;
+
+    // Listen to the user's profile to get their vehicle type.
+    const stopUserListener = onSnapshot(
+      doc(db, "users", nic.trim()),
+      (userSnapshot) => {
+        // Stop the previous quota listener if the vehicle type changes.
+        stopQuotaListener?.();
+        stopQuotaListener = undefined;
+
+        if (!userSnapshot.exists()) {
+          setUsername("");
+          setRemainingQuota(null);
+          setLoading(false);
+          setQuotaLoading(false);
+          Alert.alert("User not found");
+          return;
+        }
+
+        const userData = userSnapshot.data();
+        setUsername(userData.ownerName ?? "User");
+        setLoading(false);
+
+        const vehicleType = userData.vehicleType;
+
+        if (typeof vehicleType !== "string" || !vehicleType.trim()) {
+          setRemainingQuota(null);
+          setQuotaLoading(false);
+          return;
+        }
+
+        setQuotaLoading(true);
+
+        // Listen to the shared quota for this vehicle type.
+        stopQuotaListener = onSnapshot(
+          doc(db, "fuelQuotaSettings", vehicleType.trim()),
+          (quotaSnapshot) => {
+            if (!quotaSnapshot.exists()) {
+              setRemainingQuota(null);
+              setQuotaLoading(false);
+              return;
+            }
+
+            const quota = Number(quotaSnapshot.data().quotaLiters);
+
+            if (!Number.isFinite(quota) || quota < 0) {
+              setRemainingQuota(null);
+            } else {
+              setRemainingQuota(quota);
+            }
+
+            setQuotaLoading(false);
+          },
+          (error) => {
+            console.error("Failed to load fuel quota:", error);
+            setRemainingQuota(null);
+            setQuotaLoading(false);
+          },
+        );
+      },
+      (error) => {
+        console.error("Failed to load user:", error);
+        setLoading(false);
+        setQuotaLoading(false);
+        Alert.alert("Error", "Could not load user details.");
+      },
+    );
+
+    return () => {
+      stopUserListener();
+      stopQuotaListener?.();
+    };
   }, [nic]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" backgroundColor="#E00000" />
+
       <View style={styles.contain}>
         <View style={styles.header}>
           <Text style={styles.greeting} numberOfLines={1}>
@@ -101,13 +160,13 @@ export default function MainScreen() {
                 pathname: "/Calculation",
                 params: {
                   nic: nic ?? "",
-                  quota: remainingQuota !== null ? String(remainingQuota) : "",
                 },
               })
             }
           >
             <Text style={styles.quatatitle}>Remaining Quota</Text>
-            {loading ? (
+
+            {loading || quotaLoading ? (
               <ActivityIndicator color="#E00000" />
             ) : (
               <Text style={styles.quotaValue}>
@@ -133,6 +192,7 @@ export default function MainScreen() {
         <View style={styles.bottnav}>
           {NAV_ITEMS.map((item) => {
             const isActive = pathname === item.route;
+
             return (
               <TouchableOpacity
                 key={item.label}
@@ -140,6 +200,7 @@ export default function MainScreen() {
                 activeOpacity={0.7}
                 onPress={() => {
                   if (isActive) return;
+
                   if (item.label === "Profile") {
                     router.push({
                       pathname: "/ProfileScreen",
@@ -155,6 +216,7 @@ export default function MainScreen() {
                   size={36}
                   color={isActive ? "#E00000" : "#FFFFFF"}
                 />
+
                 <Text
                   style={[styles.navText, isActive && styles.navTextActive]}
                 >
@@ -249,7 +311,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   navItemActive: {
-    backgroundColor: "#FFFFFF", // white pill behind the active tab
+    backgroundColor: "#FFFFFF",
   },
   navText: {
     color: "#FFFFFF",
