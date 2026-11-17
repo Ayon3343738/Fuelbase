@@ -1,3 +1,4 @@
+import { signInWithPhoneNumber } from "firebase/auth";
 import {
   Alert,
   Image,
@@ -7,15 +8,13 @@ import {
   TextInput,
   TouchableOpacity,
 } from "react-native";
+import { app, auth } from "../firebase/firebaseConfig";
 
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 
 import { FirebaseRecaptchaVerifierModal } from "expo-firebase-recaptcha";
-
-import { signInWithPhoneNumber } from "firebase/auth";
-import { app, auth } from "../firebase/firebaseConfig";
 
 import {
   collection,

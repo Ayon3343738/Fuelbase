@@ -1,28 +1,19 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { onAuthStateChanged } from "firebase/auth";
-import {
-  addDoc,
-  collection,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  where,
-} from "firebase/firestore";
-import { useEffect, useState } from "react";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+
+import { useState } from "react";
 
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-
 import TransactionDatePicker from "../components/TransactionDatePicker.web";
 import TransactionMap from "../components/TransactionMap.web";
 import { auth, db } from "../firebase/firebaseConfig";
@@ -30,17 +21,6 @@ import { auth, db } from "../firebase/firebaseConfig";
 type Coordinates = {
   latitude: number;
   longitude: number;
-};
-
-type Transaction = {
-  id: string;
-  date: string;
-  location: string;
-  latitude?: number;
-  longitude?: number;
-  litres: number;
-  amount: number;
-  pricePerLitre?: number;
 };
 
 export default function AddTransaction() {
@@ -62,7 +42,6 @@ export default function AddTransaction() {
   const [selectedDate, setSelectedDate] = useState(new Date());
 
   // Saved transactions
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   // Format date as YYYY-MM-DD
   const formatDate = (value: Date) => {
@@ -108,70 +87,6 @@ export default function AddTransaction() {
   };
 
   // Load transactions based on authentication state
-  useEffect(() => {
-    let unsubscribeTransactions: (() => void) | undefined;
-
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      // Stop previous listener when authentication changes
-      unsubscribeTransactions?.();
-      unsubscribeTransactions = undefined;
-
-      if (!user) {
-        setTransactions([]);
-        return;
-      }
-
-      const transactionQuery = query(
-        collection(db, "transactions"),
-        where("userId", "==", user.uid),
-      );
-
-      unsubscribeTransactions = onSnapshot(
-        transactionQuery,
-        (snapshot) => {
-          const savedTransactions: Transaction[] = snapshot.docs.map(
-            (document) => {
-              const data = document.data();
-
-              return {
-                id: document.id,
-                date: data.date ?? "",
-                location: data.location ?? "",
-                latitude: data.latitude,
-                longitude: data.longitude,
-                litres: Number(data.litres ?? 0),
-                amount: Number(data.amount ?? 0),
-                pricePerLitre:
-                  data.pricePerLitre != null
-                    ? Number(data.pricePerLitre)
-                    : undefined,
-              };
-            },
-          );
-
-          savedTransactions.sort((a, b) => b.date.localeCompare(a.date));
-
-          setTransactions(savedTransactions);
-
-          console.log("Transactions loaded:", savedTransactions);
-        },
-        (error) => {
-          console.error("Transaction loading error:", error);
-
-          Alert.alert(
-            "Error",
-            "Unable to load saved transactions. Please check your connection.",
-          );
-        },
-      );
-    });
-
-    // Cleanup listeners
-    return () => {
-      unsubscribeTransactions?.();
-      unsubscribeAuth();
-    };
-  }, []);
 
   // Save transaction
   const addTransaction = async () => {
@@ -348,29 +263,6 @@ export default function AddTransaction() {
         </View>
 
         {/* Saved Transactions */}
-        <View style={styles.transactionList}>
-          {transactions.map((item) => (
-            <View key={item.id} style={styles.transactionItem}>
-              <Text style={styles.transactionDate}>{item.date}</Text>
-
-              <Text style={styles.transactionLocation}>{item.location}</Text>
-
-              <Text style={styles.transactionDetails}>
-                {item.litres.toFixed(2)} L
-              </Text>
-
-              <Text style={styles.transactionAmount}>
-                Rs. {item.amount.toFixed(2)}
-              </Text>
-            </View>
-          ))}
-
-          {transactions.length === 0 && (
-            <Text style={styles.emptyTransactions}>
-              No transactions added yet.
-            </Text>
-          )}
-        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );

@@ -3,30 +3,29 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-} from "react-native";
-
-import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    getDocs,
-    getFirestore,
-    serverTimestamp,
-    setDoc,
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  serverTimestamp,
+  setDoc,
 } from "firebase/firestore";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { app } from "../firebase/firebaseConfig";
 

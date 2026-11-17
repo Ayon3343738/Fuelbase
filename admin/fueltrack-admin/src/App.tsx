@@ -1,40 +1,40 @@
-import { useEffect, useMemo, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { User } from "firebase/auth";
 import {
   getIdTokenResult,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import type { User } from "firebase/auth";
 import {
   collection,
+  deleteDoc,
+  doc,
   onSnapshot,
   query,
-  where,
-  doc,
-  updateDoc,
-  deleteDoc,
-  setDoc,
   serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import {
-  LayoutDashboard,
-  ReceiptText,
-  Users,
-  ChartNoAxesCombined,
-  Fuel,
-  LogOut,
-  Search,
-  Download,
-  ShieldCheck,
-  MapPin,
   CalendarDays,
+  ChartNoAxesCombined,
+  Download,
+  Fuel,
+  LayoutDashboard,
+  LogOut,
+  MapPin,
   Pencil,
+  ReceiptText,
+  Search,
+  ShieldCheck,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
+import type { FormEvent, ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -74,6 +74,17 @@ type FuelQuota = {
   vehicleType: string;
   quotaLiters: number;
 };
+
+const VEHICLE_TYPES: { name: string; defaultQuota: number }[] = [
+  { name: "Motor Cars", defaultQuota: 20 },
+  { name: "Three-Wheelers", defaultQuota: 15 },
+  { name: "Motorcycles", defaultQuota: 5 },
+  { name: "Buses", defaultQuota: 200 },
+  { name: "Vans", defaultQuota: 40 },
+  { name: "Land Vehicles", defaultQuota: 40 },
+  { name: "Motor Lorry", defaultQuota: 80 },
+  { name: "Special Purpose Vehicles", defaultQuota: 40 },
+];
 
 const money = (n: number) =>
   `Rs. ${n.toLocaleString("en-LK", { maximumFractionDigits: 2 })}`;
@@ -197,9 +208,19 @@ export default function App() {
         setFuelQuotas(settings);
         setQuotaInputs((previous) => {
           const next = { ...previous };
+
+          // Load default quotas for all eight categories.
+          VEHICLE_TYPES.forEach((item) => {
+            if (next[item.name] === undefined) {
+              next[item.name] = String(item.defaultQuota);
+            }
+          });
+
+          // Override defaults with values saved by the admin.
           settings.forEach((item) => {
             next[item.vehicleType] = String(item.quotaLiters);
           });
+
           return next;
         });
       },
@@ -465,16 +486,9 @@ export default function App() {
     ["Transactions", ReceiptText],
     ["Users", Users],
     ["Fuel Quotas", Fuel],
-    ["Reports", ChartNoAxesCombined],
   ] as const;
 
-  const vehicleTypes = [
-    ...new Set(
-      profiles
-        .map((p) => p.vehicleType?.trim())
-        .filter((v): v is string => Boolean(v)),
-    ),
-  ].sort();
+  const vehicleTypes = VEHICLE_TYPES.map((item) => item.name);
 
   return (
     <div className="shell">
@@ -741,7 +755,7 @@ export default function App() {
                             <td>
                               {current
                                 ? `${current.quotaLiters} L`
-                                : "Not configured"}
+                                : `${VEHICLE_TYPES.find((v) => v.name === vehicleType)?.defaultQuota ?? 0} L (default)`}
                             </td>
                             <td>
                               <input
@@ -823,15 +837,11 @@ export default function App() {
                     }
                   >
                     <option value="">Select vehicle type</option>
-                    <option value="Motor Cars">Motor Cars</option>
-                    <option value="Motorcycles">Motorcycles</option>
-                    <option value="Three Wheelers">Three Wheelers</option>
-                    <option value="Dual Purpose Vehicles">
-                      Dual Purpose Vehicles
-                    </option>
-                    <option value="Vans">Vans</option>
-                    <option value="Lorries">Lorries</option>
-                    <option value="Buses">Buses</option>
+                    {VEHICLE_TYPES.map((item) => (
+                      <option key={item.name} value={item.name}>
+                        {item.name}
+                      </option>
+                    ))}
                   </select>
                 </label>
 
@@ -886,38 +896,6 @@ export default function App() {
                 </div>
               </section>
             </div>
-          )}
-
-          {/* REPORTS */}
-          {page === "Reports" && (
-            <>
-              <div className="stats">
-                <Stat
-                  icon={<Fuel />}
-                  label="Average litres / transaction"
-                  value={`${tx.length ? (litres / tx.length).toFixed(2) : "0"} L`}
-                />
-                <Stat
-                  icon={<ChartNoAxesCombined />}
-                  label="Average transaction"
-                  value={money(tx.length ? spend / tx.length : 0)}
-                />
-              </div>
-
-              <section className="panel">
-                <div className="panelhead">
-                  <div>
-                    <h2>Transaction report</h2>
-                    <p>Download records for further analysis.</p>
-                  </div>
-                  <button className="primary" onClick={csv}>
-                    <Download size={16} />
-                    Download CSV
-                  </button>
-                </div>
-                <Table rows={tx.slice(0, 10)} />
-              </section>
-            </>
           )}
 
           <footer>FuelTrack Admin · Connected to Firebase</footer>

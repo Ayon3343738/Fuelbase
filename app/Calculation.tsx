@@ -5,7 +5,6 @@ import { doc, getFirestore, onSnapshot } from "firebase/firestore";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { app } from "../firebase/firebaseConfig";
 

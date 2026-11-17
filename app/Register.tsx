@@ -3,11 +3,12 @@ import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 
+import { doc, getDoc, getFirestore, writeBatch } from "firebase/firestore";
+import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
 import {
   ActivityIndicator,
   Alert,
   Image,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,10 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-
-import { doc, getDoc, getFirestore, writeBatch } from "firebase/firestore";
-
-import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 import { app } from "../firebase/firebaseConfig";
 
