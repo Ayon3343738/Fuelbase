@@ -1,7 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { doc, onSnapshot } from "firebase/firestore";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -13,12 +10,31 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import QRCode from "react-native-qrcode-svg";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { db } from "../firebase/firebaseConfig";
 
-const RED = "#CC0A0A";
+import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
+
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+
+import * as ImagePicker from "expo-image-picker";
+
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { db, storage } from "../firebase/firebaseConfig";
+
+// --------------------------------------------------
+// COLORS
+// --------------------------------------------------
+
+const RED = "#E60000";
 const WHITE = "#FFFFFF";
+const DARK_RED = "#B80000";
+
+// --------------------------------------------------
+// USER TYPE
+// --------------------------------------------------
 
 type RegisteredUser = {
   ownerName?: string;
@@ -27,52 +43,44 @@ type RegisteredUser = {
   vehicleNumber?: string;
   vehicleType?: string;
   fuelType?: string;
+  qrImageUrl?: string;
   qrImage?: string;
   remainingQuota?: number;
   validUntil?: string;
   accountStatus?: string;
 };
 
-const formatDate = (value?: string) => {
-  if (!value) return "Not set";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return date.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-};
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.infoRow}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value || "Not available"}</Text>
-    </View>
-  );
-}
+// --------------------------------------------------
+// PROFILE SCREEN
+// --------------------------------------------------
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ nic?: string }>();
 
-  const { nic } = useLocalSearchParams<{ nic?: string }>();
+  const params = useLocalSearchParams<{
+    nic?: string | string[];
+  }>();
+
+  const nic = Array.isArray(params.nic) ? params.nic[0] : params.nic;
+
+  const userId = nic?.trim() ?? "";
 
   const [user, setUser] = useState<RegisteredUser | null>(null);
   const [loading, setLoading] = useState(true);
-  const [imageError, setImageError] = useState(false);
+  const [uploadingQR, setUploadingQR] = useState(false);
+
+  // --------------------------------------------------
+  // LOAD USER FROM FIRESTORE
+  // --------------------------------------------------
 
   useEffect(() => {
-    if (!nic) {
+    if (!userId) {
       setLoading(false);
-      Alert.alert("Missing NIC", "No registered user was selected.");
+      Alert.alert("Error", "User NIC is missing.");
       return;
     }
-    const cleanNic = nic.trim().toUpperCase();
-    const userRef = doc(db, "users", nic.trim());
+
+    const userRef = doc(db, "users", userId);
 
     const unsubscribe = onSnapshot(
       userRef,
@@ -82,236 +90,399 @@ export default function ProfileScreen() {
         } else {
           setUser(null);
         }
+
         setLoading(false);
       },
       (error) => {
-        console.error("Profile fetch error:", error);
+        console.error("Profile loading error:", error);
         setLoading(false);
-        Alert.alert("Error", "Could not load the registered user.");
+
+        Alert.alert("Error", "Unable to load profile information.");
       },
     );
 
-    return unsubscribe;
-  }, [nic]);
+    return () => unsubscribe();
+  }, [userId]);
 
-  useEffect(() => {
-    setImageError(false);
-  }, [user?.qrImage]);
+  // --------------------------------------------------
+  // UPLOAD QR IMAGE TO FIREBASE
+  // --------------------------------------------------
 
-  const vehicleNumber = user?.vehicleNumber || "";
-  const quota = Number(user?.remainingQuota ?? 0);
+  const uploadQRCode = async () => {
+    if (!userId) {
+      Alert.alert("Error", "User NIC is missing.");
+      return;
+    }
 
-  const qrValue = JSON.stringify({
-    nic: user?.nic || nic,
-    vehicleNumber,
-  });
+    if (uploadingQR) return;
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          "Permission required",
+          "Please allow access to your photos to upload your QR code.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      setUploadingQR(true);
+
+      const selectedImage = result.assets[0];
+
+      const response = await fetch(selectedImage.uri);
+      const blob = await response.blob();
+
+      const fileName = `qr_${Date.now()}.jpg`;
+
+      const storageRef = ref(storage, `qrImages/${userId}/${fileName}`);
+
+      console.log("Step 1: Uploading QR image...");
+
+      await uploadBytes(storageRef, blob, {
+        contentType: selectedImage.mimeType || "image/jpeg",
+      });
+
+      console.log("Step 1 successful: QR uploaded.");
+
+      const downloadURL = await getDownloadURL(storageRef);
+
+      console.log("Step 2 successful: Download URL received.");
+
+      await updateDoc(doc(db, "users", userId), {
+        qrImageUrl: downloadURL,
+      });
+
+      console.log("Step 3 successful: Firestore updated.");
+      //
+
+      Alert.alert("Success", "Your QR code was uploaded successfully.");
+    } catch (error) {
+      console.error("QR upload error:", error);
+
+      Alert.alert(
+        "Upload failed",
+        "Could not upload your QR code. Please try again.",
+      );
+    } finally {
+      setUploadingQR(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <StatusBar backgroundColor={RED} barStyle="light-content" />
+
+        <ActivityIndicator size="large" color={WHITE} />
+
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  // --------------------------------------------------
+  // USER NOT FOUND
+  // --------------------------------------------------
+
+  if (!user) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <StatusBar backgroundColor={RED} barStyle="light-content" />
+
+        <Ionicons name="person-circle-outline" size={65} color={WHITE} />
+
+        <Text style={styles.errorTitle}>Profile not found</Text>
+
+        <Text style={styles.errorSubtitle}>
+          We could not find your registered information.
+        </Text>
+
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  // --------------------------------------------------
+  // QR IMAGE URL
+  // --------------------------------------------------
+
+  const qrImageUri = user.qrImageUrl || user.qrImage || "";
+
+  // --------------------------------------------------
+  // PROFILE UI
+  // --------------------------------------------------
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={RED} />
+      <StatusBar backgroundColor={RED} barStyle="light-content" />
+
+      {/* HEADER */}
 
       <View style={styles.header}>
         <TouchableOpacity
+          style={styles.headerBack}
           onPress={() => router.back()}
-          style={styles.backButton}
-          accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={27} color={WHITE} />
+          <Ionicons name="arrow-back" size={25} color={WHITE} />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>Profile</Text>
+
+        <View style={styles.headerRight} />
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={WHITE} />
-          <Text style={styles.loadingText}>Loading profile...</Text>
-        </View>
-      ) : !user ? (
-        <View style={styles.center}>
-          <Ionicons name="person-circle-outline" size={70} color={WHITE} />
-          <Text style={styles.message}>Registered user not found.</Text>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.qrCard}>
-            {user.qrImage ? (
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.content}
+      >
+        {/* QR CODE */}
+
+        <TouchableOpacity
+          style={styles.qrContainer}
+          onPress={uploadQRCode}
+          disabled={uploadingQR}
+          activeOpacity={0.85}
+        >
+          {uploadingQR ? (
+            <View style={styles.qrPlaceholder}>
+              <ActivityIndicator size="large" color={RED} />
+
+              <Text style={styles.uploadText}>Uploading QR...</Text>
+            </View>
+          ) : qrImageUri ? (
+            <>
               <Image
-                source={{ uri: user.qrImage }}
+                source={{ uri: qrImageUri }}
                 style={styles.qrImage}
                 resizeMode="contain"
-                onError={() =>
-                  console.warn("Could not load uploaded QR image.")
-                }
               />
-            ) : (
-              <QRCode
-                value={qrValue}
-                size={180}
-                color="#000000"
-                backgroundColor={WHITE}
-              />
-            )}
 
-            <Text style={styles.qrCaption}>
-              {user.qrImage ? "Uploaded QR Image" : "Generated QR Code"}
-            </Text>
-          </View>
+              <View style={styles.editQRIcon}>
+                <Ionicons name="camera" size={15} color={WHITE} />
+              </View>
+            </>
+          ) : (
+            <View style={styles.qrPlaceholder}>
+              <Ionicons name="cloud-upload-outline" size={40} color={RED} />
 
-          <View style={styles.detailsCard}>
-            <Text style={styles.ownerName}>
-              {user.ownerName || "Registered User"}
-            </Text>
+              <Text style={styles.uploadText}>Upload QR Code</Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
-            <Text style={styles.vehicleLabel}>Vehicle Number</Text>
-            <Text style={styles.vehicleNumber}>
-              {vehicleNumber || "Not available"}
-            </Text>
+        {/* VEHICLE NUMBER */}
 
-            <View style={styles.divider} />
+        <View style={styles.vehicleSection}>
+          <Text style={styles.label}>Vehicle Number</Text>
 
-            <InfoRow label="NIC Number" value={user.nic || nic || ""} />
+          <Text style={styles.vehicleNumber}>{user.vehicleNumber || "-"}</Text>
+        </View>
 
-            <View style={styles.divider} />
+        {/* AVAILABLE QUOTA */}
 
-            <InfoRow label="Phone Number" value={user.phone || ""} />
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Available Quota</Text>
 
-            <View style={styles.divider} />
+          <Text style={styles.infoValue}>
+            {Number(user.remainingQuota ?? 0).toFixed(2)} L
+          </Text>
+        </View>
 
-            <InfoRow label="Vehicle Type" value={user.vehicleType || ""} />
+        {/* VALID UNTIL */}
 
-            <View style={styles.divider} />
+        <View style={styles.infoRow}>
+          <Text style={styles.label}>Valid Until</Text>
 
-            <InfoRow label="Fuel Type" value={user.fuelType || ""} />
-
-            <View style={styles.divider} />
-
-            <InfoRow
-              label="Available Quota"
-              value={`${Number.isFinite(quota) ? quota.toFixed(2) : "0.00"} L`}
-            />
-
-            <View style={styles.divider} />
-
-            <InfoRow label="Valid Until" value={formatDate(user.validUntil)} />
-
-            <View style={styles.divider} />
-
-            <InfoRow
-              label="Account Status"
-              value={user.accountStatus || "active"}
-            />
-          </View>
-        </ScrollView>
-      )}
+          <Text style={styles.infoValue}>{user.validUntil || "-"}</Text>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
+
+// --------------------------------------------------
+// STYLES
+// --------------------------------------------------
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: RED,
   },
-  header: {
-    height: 58,
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 6,
-  },
-  backButton: {
-    position: "absolute",
-    left: 20,
-    padding: 4,
-  },
-  headerTitle: {
-    color: WHITE,
-    fontSize: 27,
-    fontWeight: "800",
-  },
-  content: {
-    paddingHorizontal: 22,
-    paddingTop: 20,
-    paddingBottom: 35,
-  },
-  center: {
+
+  loadingContainer: {
     flex: 1,
+    backgroundColor: RED,
     justifyContent: "center",
     alignItems: "center",
-    padding: 24,
   },
+
   loadingText: {
     color: WHITE,
+    fontSize: 14,
     marginTop: 12,
-    fontSize: 16,
   },
-  message: {
+
+  errorTitle: {
     color: WHITE,
-    fontSize: 17,
-    marginTop: 12,
-    textAlign: "center",
+    fontSize: 20,
+    fontWeight: "700",
+    marginTop: 15,
   },
-  qrCard: {
-    backgroundColor: WHITE,
-    borderRadius: 18,
-    padding: 20,
-    alignItems: "center",
-    alignSelf: "center",
-    width: 230,
-  },
-  qrImage: {
-    width: 180,
-    height: 180,
-  },
-  qrCaption: {
-    color: "#555",
+
+  errorSubtitle: {
+    color: WHITE,
     fontSize: 13,
-    marginTop: 10,
     textAlign: "center",
+    marginTop: 8,
+    paddingHorizontal: 30,
   },
-  detailsCard: {
+
+  header: {
+    height: 55,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 20,
+  },
+
+  headerBack: {
+    width: 30,
+    height: 35,
+    justifyContent: "center",
+  },
+
+  headerTitle: {
+    color: WHITE,
+    fontSize: 21,
+    fontWeight: "700",
+  },
+
+  headerRight: {
+    width: 30,
+  },
+
+  content: {
+    paddingHorizontal: 20,
+    paddingBottom: 25,
+  },
+
+  // QR CONTAINER
+
+  qrContainer: {
+    width: 250,
+    height: 280,
     backgroundColor: WHITE,
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 28,
+    borderRadius: 10,
+    alignSelf: "center",
+    marginTop: 14,
+    marginBottom: 26,
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    position: "relative",
   },
-  ownerName: {
-    color: "#222",
-    fontSize: 22,
-    fontWeight: "800",
-    marginBottom: 18,
+
+  qrImage: {
+    width: "100%",
+    height: "100%",
   },
-  vehicleLabel: {
-    color: "#666",
-    fontSize: 15,
+
+  qrPlaceholder: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  vehicleNumber: {
+
+  uploadText: {
     color: RED,
-    fontSize: 25,
-    fontWeight: "800",
-    marginTop: 5,
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 8,
   },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#DDD",
-    marginVertical: 16,
+
+  editQRIcon: {
+    position: "absolute",
+    right: 7,
+    bottom: 7,
+    width: 27,
+    height: 27,
+    borderRadius: 14,
+    backgroundColor: DARK_RED,
+    justifyContent: "center",
+    alignItems: "center",
   },
+
+  // VEHICLE NUMBER
+
+  vehicleSection: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.55)",
+  },
+
+  label: {
+    color: WHITE,
+    fontSize: 14,
+    fontWeight: "400",
+  },
+
+  vehicleNumber: {
+    color: WHITE,
+    fontSize: 18,
+    fontWeight: "700",
+    marginTop: 4,
+  },
+
+  // QUOTA AND VALID UNTIL
+
   infoRow: {
+    minHeight: 52,
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.55)",
   },
-  rowLabel: {
-    color: "#555",
+
+  infoValue: {
+    color: WHITE,
     fontSize: 14,
-    flex: 1,
+    fontWeight: "500",
   },
-  rowValue: {
-    color: "#222",
-    fontSize: 14,
-    fontWeight: "600",
-    flex: 1,
-    textAlign: "right",
+
+  // BACK BUTTON
+
+  backButton: {
+    backgroundColor: WHITE,
+    paddingVertical: 13,
+    paddingHorizontal: 35,
+    borderRadius: 10,
+    marginTop: 25,
+  },
+
+  backButtonText: {
+    color: RED,
+    fontSize: 15,
+    fontWeight: "700",
   },
 });

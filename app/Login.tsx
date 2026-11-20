@@ -25,8 +25,13 @@ import {
   where,
 } from "firebase/firestore";
 
+import { LogBox } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+LogBox.ignoreLogs([
+  "No native ExponentConstants module found",
+  "No native ExpoFirebaseCore module found",
+]);
 export default function Login() {
   const router = useRouter();
 

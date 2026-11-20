@@ -1,6 +1,6 @@
-import { initializeApp, getApps, getApp } from "firebase/app";
-import { getFirestore} from "firebase/firestore";
-import { getAuth} from "firebase/auth";
+import { getApp, getApps, initializeApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 import firebase from "firebase/compat/app";
 import "firebase/compat/auth";
@@ -17,12 +17,11 @@ const firebaseConfig = {
 // ✅ IMPORTANT: prevent duplicate app initialization
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-if(!firebase.apps.length){
+if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
-
 }
 
-const db =getFirestore(app);
+const db = getFirestore(app);
 const auth = getAuth(app);
 
-export { app ,db,auth};
+export { app, auth, db };
