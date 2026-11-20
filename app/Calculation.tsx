@@ -110,7 +110,9 @@ export default function FuelQuotaScreen() {
         let parsed: CalculationData | null = null;
 
         try {
-          const remote = await getDoc(doc(db, "fuelCalculations", nicParam!.trim()));
+          const remote = await getDoc(
+            doc(db, "fuelCalculations", nicParam!.trim()),
+          );
           if (remote.exists()) {
             parsed = remote.data() as CalculationData;
           }
@@ -350,6 +352,7 @@ export default function FuelQuotaScreen() {
 
   // REMAINING QUOTA — KEEP EXISTING 2 LITRE DEDUCTION
   const remainingFuel = Math.max(0, quotaLiters - fuelUsed - 2);
+  const remainingKm = Number(kmPerLiter) * remainingFuel;
 
   const daysLeft = 4;
   const approxDailyUse = (remainingFuel / daysLeft).toFixed(2);
@@ -502,6 +505,16 @@ export default function FuelQuotaScreen() {
           <Text style={styles.totalText}>
             Fuel Used :{" "}
             <Text style={styles.totalBold}>{fuelUsed.toFixed(2)} L</Text>
+          </Text>
+
+          <Text style={styles.totalText}>
+            Remaining Fuel :{" "}
+            <Text style={styles.totalBold}>{remainingFuel.toFixed(2)} L</Text>
+          </Text>
+
+          <Text style={styles.totalText}>
+            Remaining KM :{" "}
+            <Text style={styles.totalBold}>{remainingKm.toFixed(2)} Km</Text>
           </Text>
         </View>
 

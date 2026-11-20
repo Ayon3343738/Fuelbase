@@ -5,18 +5,20 @@ import { useState } from "react";
 
 import { doc, getDoc, getFirestore, writeBatch } from "firebase/firestore";
 import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage";
+
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
-  Pressable,
 } from "react-native";
+
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { app } from "../firebase/firebaseConfig";
@@ -34,6 +36,32 @@ const QUOTA_BY_VEHICLE_TYPE: Record<string, number> = {
   "Motor Lorry": 1,
   "Special Purpose Vehicles": 40,
 };
+
+// Information tooltip component
+function InfoHint({ message }: { message: string }) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <View style={hintStyles.wrapper}>
+      <Pressable
+        style={hintStyles.icon}
+        onHoverIn={() => setVisible(true)}
+        onHoverOut={() => setVisible(false)}
+        onPress={() => setVisible((previous) => !previous)}
+        accessibilityRole="button"
+        accessibilityLabel="Show information"
+      >
+        <Text style={hintStyles.iconText}>!</Text>
+      </Pressable>
+
+      {visible && (
+        <View style={hintStyles.tooltip}>
+          <Text style={hintStyles.tooltipText}>{message}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
 
 export default function Register() {
   const router = useRouter();
@@ -231,8 +259,10 @@ export default function Register() {
         ownerName: cleanOwnerName,
         nic: cleanNic,
         phone: cleanPhone,
+
         // Login + security rules match on this (+94 format)
         phoneE164: "+94" + cleanPhone.slice(1),
+
         vehicleNumber: cleanVehicleNumber,
         vehicleType,
         fuelType,
@@ -240,6 +270,7 @@ export default function Register() {
         remainingQuota: assignedQuota,
         createdAt: new Date(),
       });
+
       batch.set(doc(db, "nicIndex", cleanNic), { exist: true });
       batch.set(doc(db, "phoneIndex", cleanPhone), { exist: true });
       batch.set(doc(db, "vehicleIndex", cleanVehicleNumber), { exist: true });
@@ -250,6 +281,7 @@ export default function Register() {
       router.push("/Login");
     } catch (error) {
       console.log(error);
+
       Alert.alert(
         "Registration failed",
         (error as any)?.message ?? "Please try again.",
@@ -265,6 +297,7 @@ export default function Register() {
         contentContainerStyle={styles.innerContainer}
         showsVerticalScrollIndicator={false}
       >
+        {/* Back button */}
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => router.back()}
@@ -290,47 +323,60 @@ export default function Register() {
         />
 
         {/* NIC number */}
-        <TextInput
-          placeholder="NIC number"
-          style={styles.input}
-          placeholderTextColor="#808080"
-          value={nic}
-          autoCapitalize="characters"
-          onChangeText={(text) =>
-            setNic(text.toUpperCase().replace(/[^A-Z0-9]/g, ""))
-          }
-          editable={!loading}
-        />
+        <View style={styles.inputWithInfo}>
+          <TextInput
+            placeholder="NIC number"
+            style={styles.input}
+            placeholderTextColor="#808080"
+            value={nic}
+            autoCapitalize="characters"
+            onChangeText={(text) =>
+              setNic(text.toUpperCase().replace(/[^A-Z0-9]/g, ""))
+            }
+            editable={!loading}
+          />
+          <InfoHint message="!!! Enter your correct Sri Lankan NIC number. You can use the old format with 9 digits followed by V or X, or the new 12-digit format. Incorrect NIC information may prevent registration." />
+        </View>
 
         {/* Vehicle number */}
-        <TextInput
-          placeholder="Vehicle number"
-          style={styles.input}
-          placeholderTextColor="#808080"
-          value={vehicleNumber}
-          autoCapitalize="characters"
-          maxLength={9}
-          onChangeText={(text) =>
-            setVehicleNumber(text.toUpperCase().replace(/[^A-Z0-9 -]/g, ""))
-          }
-          editable={!loading}
-        />
+        <View style={styles.inputWithInfo}>
+          <TextInput
+            placeholder="Vehicle number"
+            style={styles.input}
+            placeholderTextColor="#808080"
+            value={vehicleNumber}
+            autoCapitalize="characters"
+            maxLength={9}
+            onChangeText={(text) =>
+              setVehicleNumber(text.toUpperCase().replace(/[^A-Z0-9 -]/g, ""))
+            }
+            editable={!loading}
+          />
+          <InfoHint message="!!! Enter your correct vehicle registration number as shown on your vehicle registration documents. Check the letters, numbers and spacing carefully." />
+        </View>
 
         {/* Phone number */}
-        <TextInput
-          placeholder="Phone number"
-          keyboardType="phone-pad"
-          style={styles.input}
-          placeholderTextColor="#808080"
-          value={phone}
-          maxLength={10}
-          onChangeText={(text) => setPhone(text.replace(/[^0-9]/g, ""))}
-          editable={!loading}
-        />
+        <View style={styles.inputWithInfo}>
+          <TextInput
+            placeholder="Phone number"
+            keyboardType="phone-pad"
+            style={styles.input}
+            placeholderTextColor="#808080"
+            value={phone}
+            maxLength={10}
+            onChangeText={(text) => setPhone(text.replace(/[^0-9]/g, ""))}
+            editable={!loading}
+          />
+          <InfoHint message="!!! Enter a valid Sri Lankan mobile number with 10 digits, starting with 07. Make sure this is the phone number you intend to use for login." />
+        </View>
 
         {/* Vehicle category */}
         <View style={styles.fuelRowT}>
-          <Text style={styles.fueltypeT}>Vehicle category</Text>
+          <View style={styles.optionHeading}>
+            <Text style={styles.fueltypeT}>Vehicle category</Text>
+
+            <InfoHint message="!!! Please select the correct vehicle category. Your fuel quota is assigned according to this selection. An incorrect selection may affect your quota and tracking data." />
+          </View>
 
           <TouchableOpacity
             style={styles.rowT}
@@ -429,7 +475,11 @@ export default function Register() {
 
         {/* Fuel type */}
         <View style={styles.fuelRowT}>
-          <Text style={styles.fueltypeT}>Fuel Type</Text>
+          <View style={styles.optionHeading}>
+            <Text style={styles.fueltypeT}>Fuel Type</Text>
+
+            <InfoHint message="!!! Please select the correct fuel type for your vehicle: Petrol or Diesel. An incorrect selection may affect your fuel records." />
+          </View>
 
           <TouchableOpacity
             style={styles.rowT}
@@ -455,24 +505,30 @@ export default function Register() {
         </View>
 
         {/* QR image selection */}
-        <TouchableOpacity
-          style={styles.imageButton}
-          onPress={pickImage}
-          disabled={loading}
-        >
-          {qrImage ? (
-            <Image
-              source={{ uri: qrImage }}
-              style={styles.carImage}
-              resizeMode="contain"
-            />
-          ) : (
-            <>
-              <Ionicons name="image-outline" size={40} color="#666" />
-              <Text>Select The QR</Text>
-            </>
-          )}
-        </TouchableOpacity>
+        <View style={styles.qrUploadWrapper}>
+          <TouchableOpacity
+            style={styles.imageButton}
+            onPress={pickImage}
+            disabled={loading}
+          >
+            {qrImage ? (
+              <Image
+                source={{ uri: qrImage }}
+                style={styles.carImage}
+                resizeMode="contain"
+              />
+            ) : (
+              <>
+                <Ionicons name="image-outline" size={40} color="#666" />
+                <Text>Select The QR</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.qrInfoIcon}>
+            <InfoHint message="!!! Upload the correct QR code image associated with your vehicle. Make sure the image is clear, complete and readable." />
+          </View>
+        </View>
 
         {/* Register button */}
         <TouchableOpacity
@@ -545,6 +601,12 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
     color: "#fff",
+    marginBottom: 0,
+  },
+
+  optionHeading: {
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 15,
   },
 
@@ -616,14 +678,92 @@ const styles = StyleSheet.create({
   },
 
   imageButton: {
-    width: "85%",
+    width: "100%",
     height: 180,
     backgroundColor: "#fff",
     borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
+    marginTop: 0,
+    marginBottom: 0,
+    overflow: "hidden",
+  },
+
+  qrUploadWrapper: {
+    width: "85%",
+    position: "relative",
     marginTop: 20,
     marginBottom: 20,
-    overflow: "hidden",
+  },
+
+  qrInfoIcon: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    zIndex: 100,
+  },
+  inputWithInfo: {
+    width: "85%",
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 20,
+    position: "relative",
+    zIndex: 10,
+  },
+
+  inputField: {
+    flex: 1,
+    fontSize: 15,
+    height: 50,
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    paddingHorizontal: 15,
+    paddingRight: 45,
+    fontStyle: "italic",
+  },
+});
+
+// Tooltip styles
+const hintStyles = StyleSheet.create({
+  wrapper: {
+    position: "relative",
+    marginLeft: 9,
+    zIndex: 100,
+  },
+
+  icon: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#FFA500",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#FFFFFF",
+  },
+
+  iconText: {
+    color: "#8B0000",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  tooltip: {
+    position: "absolute",
+    bottom: 30,
+    left: -10,
+    width: 240,
+    backgroundColor: "#333333",
+    padding: 12,
+    borderRadius: 8,
+    zIndex: 999,
+    elevation: 8,
+  },
+
+  tooltipText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    lineHeight: 19,
+    fontWeight: "500",
   },
 });
